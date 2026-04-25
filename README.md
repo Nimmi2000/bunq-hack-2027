@@ -46,34 +46,21 @@ This is the core product. Voice interaction and face verification are delivery m
 
 ## Core Capabilities
 
-### 1. Real-Time Risk Decision
-Every transaction is scored before execution. The AI weighs:
-- Is the amount unusual for this user?
-- Is this a new or flagged recipient?
-- Has the user's behaviour changed in this session?
+### 1. Voice-to-Intent Pipeline
+Speech is captured in the browser and streamed to Amazon Nova Sonic for transcription. The transcript is sent to an Amazon Bedrock LLM that identifies the user's intent (payment, balance check, money request, payment link) and routes it to the correct bunq API action.
 
-The system responds with one of three outcomes: **Allow**, **Warn**, or **Block**.
+### 2. Banking Actions via bunq API
+The system executes real bunq API calls:
+- **Make a payment** — send money to a contact by name or email
+- **List accounts & balances** — retrieve account summary
+- **Request money** — create an inbound payment request
+- **Create a payment link** — generate a shareable bunq.me link
 
-### 2. Coercion & Stress Detection
-The voice pipeline analyses the user's speech for signals that suggest the user may not be acting freely:
-- Elevated stress or hesitation patterns
-- Rushed, scripted, or pressured speech
-- Inconsistency between intent and emotional tone
+### 3. Face Verification
+Before any transaction executes, the user must pass a face check. A live camera capture is compared against a stored reference image using Amazon Bedrock Nova Lite (vision model). The transaction proceeds only if the faces match.
 
-If coercion signals are detected, the transaction is paused and the user is asked a safety question privately.
-
-### 3. Multiple Speaker Detection
-The audio input is monitored for secondary voices — a key signal in scam and elder fraud scenarios where a fraudster coaches the victim. If a second voice is detected during a payment request, the system triggers a warning before proceeding.
-
-### 4. Smart Transaction Risk Check
-Beyond voice signals, Finn 2.0 checks the transaction itself:
-- Unusual amount relative to account history
-- First-time or high-risk recipient
-- Transaction velocity (multiple payments in a short window)
-- Time-of-day anomalies
-
-### 5. Step-Up Authentication
-Face verification is not continuous — that would be a GDPR liability. Instead, it is triggered only when the risk score crosses a threshold. Low-risk actions proceed immediately. High-risk actions require an additional identity check.
+### 4. Conversational Session Memory
+The assistant maintains context across turns within a session, so follow-up instructions ("send the same amount to John instead") resolve correctly without the user repeating details.
 
 ---
 
