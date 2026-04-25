@@ -7,7 +7,7 @@ from pathlib import Path
 
 import requests as _http
 
-REFERENCE_PATH = Path(__file__).parent / "face_reference.jpg"
+REFERENCE_PATH = Path(__file__).parents[2] / "face_reference.jpg"
 
 _REGION   = lambda: os.environ.get("AWS_REGION", "us-east-1")
 _API_KEY  = lambda: (

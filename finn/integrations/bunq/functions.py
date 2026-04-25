@@ -5,11 +5,8 @@ If BUNQ_API_KEY is not set, a sandbox user is created automatically.
 """
 
 import os
-import sys
 
-# Make BunqClient importable when this file is called from the project root
-sys.path.insert(0, os.path.dirname(__file__))
-from bunq_client import BunqClient
+from finn.integrations.bunq.client import BunqClient
 
 
 def _client() -> BunqClient:

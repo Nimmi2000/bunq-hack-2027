@@ -19,8 +19,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import face_auth
-import voice_pipeline
+from finn.core import face_auth
+from finn.core import voice_pipeline
 
 app = FastAPI(title="Finn Voice Backend", version="1.0.0")
 

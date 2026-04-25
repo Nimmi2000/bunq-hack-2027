@@ -25,7 +25,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import urllib.parse
 import uuid
@@ -46,8 +45,7 @@ from aws_sdk_bedrock_runtime.models import (
 from aws_sdk_bedrock_runtime.config import Config
 from smithy_aws_core.identity.environment import EnvironmentCredentialsResolver
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "utils"))
-from bunq_functions import (
+from finn.integrations.bunq.functions import (
     create_payment_link,
     list_accounts,
     list_transactions,
