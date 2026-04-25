@@ -596,7 +596,6 @@ function closeVoice() {{
 
 // ── Show response + TTS ───────────────────────────────────────────────────────
 function showResponse(text) {{
-  stopListening();
   document.getElementById('spinner').classList.remove('show');
   let display = text;
   if (typeof text === 'object' && text !== null) {{
@@ -635,6 +634,7 @@ function speak(text) {{
   window.speechSynthesis.speak(utt);
 }}
 window.speechSynthesis && window.speechSynthesis.getVoices();
+window.addEventListener('load', () => {{ setTimeout(() => openVoice(), 800); }});
 
 // ── Text query → /query endpoint ─────────────────────────────────────────────
 async function askFinnText() {{
@@ -692,12 +692,11 @@ function startListening() {{
         const fullText = accumulatedTranscript.trim();
         const lower = fullText.toLowerCase();
         if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done')) {{
-          document.getElementById('mic-status').textContent = 'Closing voice...';
-          await sendTextToBackend(fullText);
-          stopListening();
+          closeVoice();
           return;
         }}
         if (fullText) {{
+          accumulatedTranscript = '';
           await sendTextToBackend(fullText);
         }}
       }} else {{
