@@ -1,6 +1,47 @@
+"""
+Streamlit frontend for the bunq Finn demo.
+
+Starts the FastAPI voice backend (backend.py) as a daemon thread on port 8000,
+then renders the phone-style UI via st.components.v1.html().
+
+Voice pipeline (triggered by the 🎤 FAB):
+  Web Speech API (browser STT) → POST /query → Amazon Bedrock (tool use)
+  → bunq_functions.py → natural language reply → Web Speech TTS
+"""
+
+import socket
+import threading
+
+from dotenv import load_dotenv
+load_dotenv()  # loads .env from the project root before anything else
+
+import os
 import streamlit as st
 import streamlit.components.v1 as components
-import os
+import uvicorn
+import backend
+
+# ── Launch FastAPI backend once per process ───────────────────────────────────
+
+BACKEND_PORT = int(os.environ.get("BACKEND_PORT", 8000))
+
+
+def _backend_running() -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("localhost", BACKEND_PORT)) == 0
+
+
+def _start_backend() -> None:
+    if not _backend_running():
+        uvicorn.run(backend.app, host="0.0.0.0", port=BACKEND_PORT, log_level="error")
+
+
+if "backend_thread_started" not in st.session_state:
+    t = threading.Thread(target=_start_backend, daemon=True)
+    t.start()
+    st.session_state.backend_thread_started = True
+
+# ── Streamlit page config ─────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="bunq",
@@ -9,22 +50,24 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Minimal Streamlit chrome removal
-st.markdown("""
-<style>
-#MainMenu, footer, header { visibility: hidden; }
-[data-testid="stAppViewContainer"] { background: #0a0a0a !important; }
-[data-testid="stHeader"] { display: none !important; }
-[data-testid="block-container"] {
-    padding: 0 !important;
-    max-width: 430px !important;
-    margin: 0 auto !important;
-}
-section[data-testid="stSidebar"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+    #MainMenu, footer, header { visibility: hidden; }
+    [data-testid="stAppViewContainer"] { background: #0a0a0a !important; }
+    [data-testid="stHeader"] { display: none !important; }
+    [data-testid="block-container"] {
+        padding: 0 !important;
+        max-width: 430px !important;
+        margin: 0 auto !important;
+    }
+    section[data-testid="stSidebar"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+# ── Full HTML/CSS/JS bundle rendered in an iframe ─────────────────────────────
 
 HTML = f"""<!DOCTYPE html>
 <html lang="en">
@@ -48,7 +91,6 @@ body {{
   margin: 0 auto;
   min-height: 100vh;
   padding-bottom: 110px;
-  position: relative;
 }}
 
 /* ── Status bar ── */
@@ -60,7 +102,6 @@ body {{
   font-size: 12px;
   font-weight: 600;
 }}
-.status-right {{ display: flex; gap: 8px; align-items: center; }}
 
 /* ── Top bar ── */
 .top-bar {{
@@ -84,15 +125,13 @@ body {{
   border: none; color: #fff;
 }}
 
-/* ── Search / Finn ── */
+/* ── Search bar ── */
 .search-bar {{
   margin: 0 16px 18px;
   background: #1a1a1a;
   border-radius: 14px;
   padding: 13px 16px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: flex; align-items: center; gap: 10px;
   cursor: pointer;
   border: 1px solid #252525;
 }}
@@ -118,8 +157,6 @@ body {{
   padding: 0 16px;
   margin-bottom: 8px;
 }}
-
-/* base card */
 .card {{
   border-radius: 20px;
   padding: 16px;
@@ -128,132 +165,60 @@ body {{
   overflow: hidden;
 }}
 
-/* Total balance – purple */
+/* Balance card */
 .card-balance {{
   background: linear-gradient(145deg, #6d28d9 0%, #8b5cf6 55%, #c084fc 100%);
 }}
 .card-balance .lbl {{
-  font-size: 11px;
-  font-weight: 500;
-  opacity: .85;
+  font-size: 11px; font-weight: 500; opacity: .85;
   margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+  display: flex; align-items: center; gap: 5px;
 }}
-.card-balance .amt {{
-  font-size: 23px;
-  font-weight: 800;
-  line-height: 1.1;
-}}
-.card-balance .sub {{
-  font-size: 13px;
-  font-weight: 500;
-  opacity: .75;
-  margin-top: 2px;
-}}
+.card-balance .amt {{ font-size: 23px; font-weight: 800; line-height: 1.1; }}
+.card-balance .sub {{ font-size: 13px; font-weight: 500; opacity: .75; margin-top: 2px; }}
 
-/* Summer Vacay */
-.card-vacay {{
-  background: #181818;
-  border: 1px solid #252525;
-}}
-.card-vacay .ttl {{
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 14px;
-}}
-.card-vacay .icons {{
-  display: flex;
-  gap: 8px;
-  font-size: 20px;
-}}
+/* Vacay card */
+.card-vacay {{ background: #181818; border: 1px solid #252525; }}
+.card-vacay .ttl {{ font-size: 13px; font-weight: 700; margin-bottom: 14px; }}
+.card-vacay .icons {{ display: flex; gap: 8px; font-size: 20px; }}
 
-/* Main – orange dot */
-.card-main {{
-  background: #181818;
-  border: 1px solid #252525;
-}}
-.card-savings {{
-  background: #181818;
-  border: 1px solid #252525;
-}}
-.dot {{
-  width: 9px; height: 9px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 6px;
-  flex-shrink: 0;
-}}
+/* Main / Savings */
+.card-main, .card-savings {{ background: #181818; border: 1px solid #252525; }}
+.dot {{ width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }}
 .dot-orange {{ background: #f97316; }}
 .dot-green  {{ background: #22c55e; }}
-.card-ttl {{
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-}}
-.card-amt {{
-  font-size: 20px;
-  font-weight: 800;
-}}
+.card-ttl {{ font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; }}
+.card-amt {{ font-size: 20px; font-weight: 800; }}
 
-/* Everyday – full width */
+/* Everyday full-width */
 .card-everyday {{
   grid-column: span 2;
   background: linear-gradient(135deg, #1a1a2e 0%, #2d1b69 55%, #1a1a2e 100%);
   border: 1px solid #3a2a6a;
   min-height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   padding: 14px 20px;
 }}
-.everyday-left .lbl {{
-  font-size: 11px;
-  font-weight: 600;
-  color: #999;
-  margin-bottom: 4px;
-}}
-.everyday-left .num {{
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 2px;
-}}
+.everyday-left .lbl {{ font-size: 11px; font-weight: 600; color: #999; margin-bottom: 4px; }}
+.everyday-left .num {{ font-size: 15px; font-weight: 700; letter-spacing: 2px; }}
 .mc {{ display: flex; align-items: center; }}
-.mc-c {{
-  width: 28px; height: 28px;
-  border-radius: 50%;
-}}
+.mc-c {{ width: 28px; height: 28px; border-radius: 50%; }}
 .mc-r {{ background: #eb001b; margin-right: -10px; z-index: 1; }}
 .mc-o {{ background: #f79e1b; opacity: .9; }}
 
 /* ── Quick actions ── */
 .quick-actions {{
-  display: flex;
-  justify-content: center;
-  gap: 48px;
+  display: flex; justify-content: center; gap: 48px;
   padding: 22px 16px 10px;
 }}
 .qbtn {{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  background: none;
-  border: none;
-  color: #fff;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  cursor: pointer; background: none; border: none; color: #fff;
 }}
 .qbtn-icon {{
-  width: 52px; height: 52px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  font-weight: 700;
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 700;
 }}
 .qbtn-label {{ color: #777; font-size: 12px; font-weight: 500; }}
 .ic-pay {{ background: linear-gradient(135deg,#f97316,#fb923c); }}
@@ -262,37 +227,22 @@ body {{
 
 /* ── Bottom nav ── */
 .bottom-nav {{
-  position: fixed;
-  bottom: 0;
-  left: 50%;
+  position: fixed; bottom: 0; left: 50%;
   transform: translateX(-50%);
-  width: 100%;
-  max-width: 390px;
+  width: 100%; max-width: 390px;
   background: #101010;
   border-top: 1px solid #1e1e1e;
-  display: flex;
-  justify-content: space-around;
+  display: flex; justify-content: space-around;
   padding: 10px 0 22px;
   z-index: 100;
 }}
 .nav-item {{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  cursor: pointer;
-  color: #444;
-  font-size: 10px;
-  font-weight: 500;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  cursor: pointer; color: #444; font-size: 10px; font-weight: 500;
 }}
 .nav-item.active {{ color: #fff; }}
 .nav-icon {{ font-size: 20px; }}
-.nav-dot {{
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: #7c3aed;
-  margin: 0 auto;
-}}
+.nav-dot {{ width: 4px; height: 4px; border-radius: 50%; background: #7c3aed; margin: 0 auto; }}
 
 /* ── Voice FAB ── */
 #voice-fab {{
@@ -301,20 +251,16 @@ body {{
   right: max(12px, calc(50% - 195px + 12px));
   width: 52px; height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7c3aed, #a78bfa);
-  border: none;
-  cursor: pointer;
+  background: linear-gradient(135deg,#7c3aed,#a78bfa);
+  border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   font-size: 22px;
   box-shadow: 0 4px 20px rgba(124,58,237,.55);
   z-index: 200;
   transition: transform .15s, box-shadow .15s;
 }}
-#voice-fab:hover {{
-  transform: scale(1.08);
-  box-shadow: 0 6px 28px rgba(124,58,237,.75);
-}}
-#voice-fab.listening {{
+#voice-fab:hover {{ transform: scale(1.08); box-shadow: 0 6px 28px rgba(124,58,237,.75); }}
+#voice-fab.recording {{
   background: linear-gradient(135deg,#dc2626,#f87171);
   animation: pulse 1.2s ease-in-out infinite;
 }}
@@ -326,151 +272,108 @@ body {{
 /* ── Voice modal ── */
 #voice-modal {{
   display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  align-items: flex-end;
-  justify-content: center;
+  position: fixed; inset: 0; z-index: 300;
+  align-items: flex-end; justify-content: center;
   padding-bottom: 110px;
 }}
 #voice-modal.open {{ display: flex; }}
 .modal-backdrop {{
-  position: absolute;
-  inset: 0;
+  position: absolute; inset: 0;
   background: rgba(0,0,0,.55);
 }}
 .modal-sheet {{
   position: relative;
-  width: calc(100% - 32px);
-  max-width: 358px;
+  width: calc(100% - 32px); max-width: 358px;
   background: #161616;
   border: 1px solid #2a2a2a;
   border-radius: 24px;
-  padding: 20px;
-  z-index: 1;
+  padding: 20px; z-index: 1;
   box-shadow: 0 16px 60px rgba(0,0,0,.7);
 }}
-.modal-tag {{
-  font-size: 10px;
-  font-weight: 700;
-  color: #a78bfa;
-  letter-spacing: 1px;
-  margin-bottom: 6px;
-}}
-.modal-title {{
-  font-size: 17px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}}
-.modal-sub {{
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 16px;
-}}
+.modal-tag  {{ font-size: 10px; font-weight: 700; color: #a78bfa; letter-spacing: 1px; margin-bottom: 6px; }}
+.modal-title {{ font-size: 17px; font-weight: 700; margin-bottom: 4px; }}
+.modal-sub  {{ font-size: 12px; color: #666; margin-bottom: 16px; }}
 .modal-close {{
-  position: absolute;
-  top: 14px; right: 16px;
-  background: #252525;
-  border: none;
-  color: #aaa;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 14px;
+  position: absolute; top: 14px; right: 16px;
+  background: #252525; border: none; color: #aaa;
+  width: 28px; height: 28px; border-radius: 50%;
+  cursor: pointer; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
 }}
 .modal-close:hover {{ color: #fff; background: #333; }}
 
-/* input row */
-.input-row {{
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+/* Mic button */
+.mic-btn {{
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px; color: #aaa;
+  padding: 12px; font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-bottom: 10px; transition: background .15s, border-color .15s;
 }}
+.mic-btn:hover {{ background: #222; }}
+.mic-btn.recording {{
+  background: #1a0808; border-color: #dc2626; color: #f87171;
+  animation: pulse-border 1.2s ease-in-out infinite;
+}}
+@keyframes pulse-border {{
+  0%,100% {{ box-shadow: 0 0 0 0 rgba(220,38,38,.4); }}
+  50%      {{ box-shadow: 0 0 0 6px rgba(220,38,38,0); }}
+}}
+
+/* Text input row */
+.input-row {{ display: flex; gap: 8px; margin-top: 10px; margin-bottom: 10px; }}
 .finn-input {{
   flex: 1;
-  background: #1e1e1e;
-  border: 1px solid #333;
-  border-radius: 12px;
-  padding: 10px 14px;
-  color: #fff;
-  font-size: 13px;
-  outline: none;
+  background: #1e1e1e; border: 1px solid #333;
+  border-radius: 12px; padding: 10px 14px;
+  color: #fff; font-size: 13px; outline: none;
 }}
 .finn-input::placeholder {{ color: #555; }}
 .finn-input:focus {{ border-color: #7c3aed; }}
 .send-btn {{
   background: linear-gradient(135deg,#7c3aed,#a78bfa);
-  border: none;
-  border-radius: 12px;
-  padding: 10px 14px;
-  color: #fff;
-  font-size: 16px;
-  cursor: pointer;
+  border: none; border-radius: 12px;
+  padding: 10px 14px; color: #fff; font-size: 16px; cursor: pointer;
 }}
 
-/* mic button */
-.mic-btn {{
-  width: 100%;
-  background: #1e1e1e;
-  border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  color: #aaa;
-  padding: 10px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 10px;
+/* Status / spinner */
+#mic-status {{
+  font-size: 11px; color: #555;
+  text-align: center; margin-bottom: 6px; min-height: 16px;
 }}
-.mic-btn:hover {{ background: #222; }}
-.mic-btn.active {{
-  background: #1a0a0a;
-  border-color: #dc2626;
-  color: #f87171;
+.spinner {{
+  display: none; text-align: center;
+  color: #666; font-size: 12px; padding: 8px 0;
 }}
+.spinner.show {{ display: block; }}
 
-/* response bubble */
+/* Response bubble */
 .finn-response {{
   background: #0d0d1a;
-  border: 1px solid #3a2a6a44;
-  border-radius: 14px;
-  padding: 12px 14px;
-  font-size: 13px;
-  color: #ddd;
-  line-height: 1.6;
+  border: 1px solid rgba(58,42,106,.4);
+  border-radius: 14px; padding: 12px 14px;
+  font-size: 13px; color: #ddd; line-height: 1.6;
   display: none;
 }}
 .finn-response.show {{ display: block; }}
-.finn-response .finn-name {{
-  color: #a78bfa;
-  font-weight: 700;
-  margin-bottom: 4px;
-  font-size: 11px;
-  letter-spacing: .5px;
-}}
+.finn-name {{ color: #a78bfa; font-weight: 700; margin-bottom: 4px; font-size: 11px; letter-spacing: .5px; }}
 
-/* mic status */
-#mic-status {{
-  font-size: 11px;
-  color: #555;
-  text-align: center;
-  margin-top: 6px;
-  min-height: 16px;
+/* Pipeline steps indicator */
+.steps {{
+  display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;
 }}
-
-/* spinner */
-.spinner {{
-  display: none;
-  text-align: center;
-  color: #666;
-  font-size: 12px;
-  padding: 8px 0;
+.step {{
+  font-size: 10px; padding: 3px 8px;
+  border-radius: 8px; background: #1e1e1e; color: #555;
+  border: 1px solid #2a2a2a;
+  transition: all .3s;
 }}
-.spinner.show {{ display: block; }}
+.step.active  {{ background: #1a0f2e; color: #a78bfa; border-color: #7c3aed44; }}
+.step.done    {{ background: #0a1a0a; color: #22c55e; border-color: #22c55e44; }}
+.step.error   {{ background: #1a0a0a; color: #f87171; border-color: #dc262644; }}
 </style>
 </head>
 <body>
@@ -480,7 +383,7 @@ body {{
   <!-- Status bar -->
   <div class="status-bar">
     <span>10:10</span>
-    <div class="status-right">
+    <div style="display:flex;gap:8px;align-items:center;">
       <span>&#9646;&#9646;&#9646;</span>
       <span>&#x1F4F6;</span>
       <span>&#x1F50B;</span>
@@ -496,8 +399,8 @@ body {{
     </div>
   </div>
 
-  <!-- Ask Finn search bar -->
-  <div class="search-bar">
+  <!-- Ask Finn -->
+  <div class="search-bar" onclick="openVoice()">
     <span class="search-star">&#x2736;</span>
     <span class="search-text">Ask Finn Anything</span>
   </div>
@@ -511,36 +414,27 @@ body {{
   <!-- Cards grid -->
   <div class="cards-grid">
 
-    <!-- Total balance -->
     <div class="card card-balance">
       <div class="lbl"><span>&#x2736;</span> Total balance</div>
       <div class="amt">&euro; 2,433</div>
       <div class="sub">.00</div>
     </div>
 
-    <!-- Summer Vacay -->
     <div class="card card-vacay">
       <div class="ttl">Summer Vacay</div>
       <div class="icons">&#x2708;&#xFE0F; &#x1F3CA; &#x1F381;</div>
     </div>
 
-    <!-- Main -->
     <div class="card card-main">
-      <div class="card-ttl">
-        <span class="dot dot-orange"></span>Main
-      </div>
+      <div class="card-ttl"><span class="dot dot-orange"></span>Main</div>
       <div class="card-amt">&euro; 900.00</div>
     </div>
 
-    <!-- Savings -->
     <div class="card card-savings">
-      <div class="card-ttl">
-        <span class="dot dot-green"></span>Savings
-      </div>
+      <div class="card-ttl"><span class="dot dot-green"></span>Savings</div>
       <div class="card-amt">&euro; 310.00</div>
     </div>
 
-    <!-- Everyday card -->
     <div class="card card-everyday">
       <div class="everyday-left">
         <div class="lbl">Everyday</div>
@@ -554,51 +448,26 @@ body {{
 
   </div>
 
-  <!-- Quick actions: Pay / Request / Add -->
+  <!-- Quick actions -->
   <div class="quick-actions">
-    <button class="qbtn">
-      <div class="qbtn-icon ic-pay">&#x2191;</div>
-      <span class="qbtn-label">Pay</span>
-    </button>
-    <button class="qbtn">
-      <div class="qbtn-icon ic-req">&#x2193;</div>
-      <span class="qbtn-label">Request</span>
-    </button>
-    <button class="qbtn">
-      <div class="qbtn-icon ic-add">&#xFF0B;</div>
-      <span class="qbtn-label">Add</span>
-    </button>
+    <button class="qbtn"><div class="qbtn-icon ic-pay">&#x2191;</div><span class="qbtn-label">Pay</span></button>
+    <button class="qbtn"><div class="qbtn-icon ic-req">&#x2193;</div><span class="qbtn-label">Request</span></button>
+    <button class="qbtn"><div class="qbtn-icon ic-add">&#xFF0B;</div><span class="qbtn-label">Add</span></button>
   </div>
 
-</div>
+</div><!-- /phone -->
 
 <!-- Bottom nav -->
 <div class="bottom-nav">
-  <div class="nav-item active">
-    <div class="nav-icon">&#x1F3E0;</div>
-    <span>Home</span>
-    <div class="nav-dot"></div>
-  </div>
-  <div class="nav-item">
-    <div class="nav-icon">&#x2708;&#xFE0F;</div>
-    <span>Travel</span>
-  </div>
-  <div class="nav-item">
-    <div class="nav-icon">&#x1F4CA;</div>
-    <span>Budgeting</span>
-  </div>
-  <div class="nav-item">
-    <div class="nav-icon">&#x1F4C8;</div>
-    <span>Stocks</span>
-  </div>
-  <div class="nav-item">
-    <div class="nav-icon">&#x20BF;</div>
-    <span>Crypto</span>
-  </div>
+  <div class="nav-item active"><div class="nav-icon">&#x1F3E0;</div><span>Home</span><div class="nav-dot"></div></div>
+  <div class="nav-item"><div class="nav-icon">&#x2708;&#xFE0F;</div><span>Travel</span></div>
+  <div class="nav-item"><div class="nav-icon">&#x1F4CA;</div><span>Budgeting</span></div>
+  <div class="nav-item"><div class="nav-icon">&#x1F4C8;</div><span>Stocks</span></div>
+  <div class="nav-item"><div class="nav-icon">&#x20BF;</div><span>Crypto</span></div>
 </div>
 
 <!-- Voice FAB -->
-<button id="voice-fab" title="Talk to Finn" onclick="openVoice()">&#x1F3A4;</button>
+<button id="voice-fab" title="Ask Finn" onclick="openVoice()">&#x1F3A4;</button>
 
 <!-- Voice modal -->
 <div id="voice-modal">
@@ -607,26 +476,33 @@ body {{
     <button class="modal-close" onclick="closeVoice()">&#x2715;</button>
     <div class="modal-tag">&#x2736; FINN VOICE</div>
     <div class="modal-title">Ask Finn</div>
-    <div class="modal-sub">Speak or type — Finn answers out loud.</div>
+    <div class="modal-sub">Tap the mic and speak, or type your request.</div>
 
-    <button class="mic-btn" id="mic-btn" onclick="toggleMic()">
+    <!-- Pipeline steps -->
+    <div class="steps">
+      <span class="step" id="step-mic">&#x1F3A4; Voice</span>
+      <span class="step" id="step-bedrock">&#x1F916; Bedrock</span>
+      <span class="step" id="step-bunq">&#x1F3E6; bunq</span>
+    </div>
+
+    <!-- Mic button — Web Speech API -->
+    <button class="mic-btn" id="mic-btn" onclick="toggleListening()">
       <span id="mic-icon">&#x1F3A4;</span>
       <span id="mic-label">Tap to speak</span>
     </button>
     <div id="mic-status"></div>
 
-    <div class="input-row" style="margin-top:10px;">
+    <!-- Text input fallback -->
+    <div class="input-row">
       <input
-        class="finn-input"
-        id="finn-input"
-        type="text"
-        placeholder="What&#x27;s my balance? Send &#x20AC;10 to Sara&#x2026;"
-        onkeydown="if(event.key==='Enter') askFinn()"
+        class="finn-input" id="finn-input" type="text"
+        placeholder="Or type: what&#x27;s my balance? Send &#x20AC;10 to Sara&#x2026;"
+        onkeydown="if(event.key==='Enter') askFinnText()"
       >
-      <button class="send-btn" onclick="askFinn()">&#x279C;</button>
+      <button class="send-btn" onclick="askFinnText()">&#x279C;</button>
     </div>
 
-    <div class="spinner" id="spinner">Finn is thinking&#x2026;</div>
+    <div class="spinner" id="spinner">Processing&#x2026;</div>
 
     <div class="finn-response" id="finn-response">
       <div class="finn-name">FINN</div>
@@ -636,78 +512,98 @@ body {{
 </div>
 
 <script>
-const API_KEY = "{api_key}";
+function getBackendOrigin() {{
+  let origin = '';
+  try {{
+    if (window.parent && window.parent.location && window.parent.location.origin && window.parent.location.origin.startsWith('http')) {{
+      origin = window.parent.location.origin;
+    }}
+  }} catch (e) {{}}
+  if (!origin) {{
+    try {{
+      if (document.referrer) {{
+        const ref = new URL(document.referrer);
+        if (ref.origin.startsWith('http')) origin = ref.origin;
+      }}
+    }} catch (e) {{}}
+  }}
+  if (!origin && window.location.origin && window.location.origin.startsWith('http')) {{
+    origin = window.location.origin;
+  }}
+  if (!origin) {{
+    const protocol = window.location.protocol && window.location.protocol.startsWith('http')
+      ? window.location.protocol
+      : 'http:';
+    const hostname = window.location.hostname || 'localhost';
+    origin = protocol + '//' + hostname;
+  }}
 
-// ── Modal open/close ──────────────────────────────────────────────────
+  try {{
+    const parsed = new URL(origin);
+    parsed.port = '{BACKEND_PORT}';
+    return parsed.origin;
+  }} catch (e) {{
+    return origin.replace(/:\\d+$/, '') + ':{BACKEND_PORT}';
+  }}
+}}
+const BACKEND = getBackendOrigin();
+console.log('Finn BACKEND endpoint:', BACKEND);
+
+// ── Pipeline step indicator helpers ──────────────────────────────────────────
+const STEPS = ['step-mic','step-bedrock','step-bunq'];
+function setStep(id, state) {{
+  const el = document.getElementById(id);
+  if (el) el.className = 'step ' + state;
+}}
+function resetSteps() {{
+  STEPS.forEach(s => {{
+    const el = document.getElementById(s);
+    if (el) el.className = 'step';
+  }});
+}}
+function allStepsDone() {{
+  STEPS.forEach(s => {{
+    const el = document.getElementById(s);
+    if (el) el.className = 'step done';
+  }});
+}}
+
+// ── Modal open/close ──────────────────────────────────────────────────────────
 function openVoice() {{
   document.getElementById('voice-modal').classList.add('open');
+  resetSteps();
   document.getElementById('finn-input').focus();
 }}
 function closeVoice() {{
+  stopListening();
   document.getElementById('voice-modal').classList.remove('open');
-  stopMic();
 }}
 
-// ── Ask Finn (Claude API) ──────────────────────────────────────────────
-async function askFinn() {{
-  const input = document.getElementById('finn-input');
-  const text  = input.value.trim();
-  if (!text) return;
-
-  const spinner  = document.getElementById('spinner');
-  const response = document.getElementById('finn-response');
-  const finnText = document.getElementById('finn-text');
-
-  spinner.classList.add('show');
-  response.classList.remove('show');
-
-  try {{
-    const res = await fetch('https://api.anthropic.com/v1/messages', {{
-      method: 'POST',
-      headers: {{
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      }},
-      body: JSON.stringify({{
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        system: 'You are Finn, bunq\\'s friendly AI banking assistant. ' +
-                'Answer in 1-2 sentences, warm and concise — this is a voice interface. ' +
-                'User is Eva. Balances: Total €2,433 | Main €900 | Savings €310.',
-        messages: [{{ role: 'user', content: text }}]
-      }})
-    }});
-
-    if (!res.ok) {{
-      const err = await res.json();
-      throw new Error(err.error?.message || 'API error ' + res.status);
-    }}
-
-    const data = await res.json();
-    const reply = data.content[0].text;
-
-    spinner.classList.remove('show');
-    finnText.textContent = reply;
-    response.classList.add('show');
-    input.value = '';
-
-    speak(reply);
-  }} catch(e) {{
-    spinner.classList.remove('show');
-    finnText.textContent = 'Sorry, I ran into an issue: ' + e.message;
-    response.classList.add('show');
-  }}
+// ── Show response + TTS ───────────────────────────────────────────────────────
+function showResponse(text) {{
+  document.getElementById('spinner').classList.remove('show');
+  document.getElementById('finn-text').textContent = text;
+  document.getElementById('finn-response').classList.add('show');
+  document.getElementById('mic-status').textContent = '';
+  allStepsDone();
+  speak(text);
 }}
 
-// ── TTS ───────────────────────────────────────────────────────────────
+function showError(msg) {{
+  document.getElementById('spinner').classList.remove('show');
+  document.getElementById('finn-text').textContent = '⚠️ ' + msg;
+  document.getElementById('finn-response').classList.add('show');
+  STEPS.forEach(s => {{
+    const el = document.getElementById(s);
+    if (el && el.className.includes('active')) el.className = 'step error';
+  }});
+}}
+
 function speak(text) {{
   if (!window.speechSynthesis) return;
   window.speechSynthesis.cancel();
   const utt = new SpeechSynthesisUtterance(text);
-  utt.rate  = 1.0;
-  utt.pitch = 1.05;
+  utt.rate = 1.0; utt.pitch = 1.05;
   const voices = window.speechSynthesis.getVoices();
   const v = voices.find(v =>
     v.name.includes('Samantha') ||
@@ -717,64 +613,121 @@ function speak(text) {{
   if (v) utt.voice = v;
   window.speechSynthesis.speak(utt);
 }}
+window.speechSynthesis && window.speechSynthesis.getVoices();
 
-// ── Speech recognition ────────────────────────────────────────────────
-let recog = null;
+// ── Text query → /query endpoint ─────────────────────────────────────────────
+async function askFinnText() {{
+  const input = document.getElementById('finn-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  await sendTextToBackend(text);
+}}
+
+// ── Browser speech recognition → /query endpoint ────────────────────────────
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
 let isListening = false;
 
-function toggleMic() {{
-  isListening ? stopMic() : startMic();
+function toggleListening() {{
+  if (isListening) stopListening();
+  else             startListening();
 }}
 
-function startMic() {{
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {{
-    document.getElementById('mic-status').textContent = 'Speech recognition not supported.';
+function startListening() {{
+  if (!SpeechRecognition) {{
+    showError('Speech recognition is not supported in this browser.');
     return;
   }}
-  recog = new SR();
-  recog.lang = 'en-US';
-  recog.interimResults = false;
-  recog.maxAlternatives = 1;
 
-  recog.onstart = () => {{
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {{
     isListening = true;
-    document.getElementById('voice-fab').classList.add('listening');
-    document.getElementById('mic-btn').classList.add('active');
-    document.getElementById('mic-label').textContent = 'Listening…';
-    document.getElementById('mic-icon').textContent = '⏹';
-    document.getElementById('mic-status').textContent = '🔴 Speak now…';
+    setStep('step-mic', 'active');
+    document.getElementById('voice-fab').classList.add('recording');
+    document.getElementById('mic-btn').classList.add('recording');
+    document.getElementById('mic-label').textContent = 'Listening...';
+    document.getElementById('mic-icon').textContent = '&#x23F3;';
+    document.getElementById('mic-status').textContent = 'Say your request now.';
+    document.getElementById('finn-response').classList.remove('show');
   }};
 
-  recog.onresult = (e) => {{
-    const transcript = e.results[0][0].transcript;
-    document.getElementById('finn-input').value = transcript;
-    document.getElementById('mic-status').textContent = '✓ Heard: ' + transcript;
-    stopMic();
-    askFinn();
+  recognition.onresult = async event => {{
+    const transcription = Array.from(event.results)
+      .map(r => r[0].transcript)
+      .join(' ')
+      .trim();
+
+    if (transcription) {{
+      document.getElementById('mic-status').textContent = 'Transcription complete.';
+      await sendTextToBackend(transcription);
+    }} else {{
+      showError('No speech detected.');
+      stopListening();
+    }}
   }};
 
-  recog.onerror = (e) => {{
-    document.getElementById('mic-status').textContent = 'Error: ' + e.error;
-    stopMic();
+  recognition.onerror = event => {{
+    showError(event.error || 'Speech recognition failed.');
+    stopListening();
   }};
 
-  recog.onend = () => stopMic();
+  recognition.onend = () => {{
+    if (isListening) stopListening();
+  }};
 
-  recog.start();
+  try {{
+    recognition.start();
+  }} catch (e) {{
+    showError('Speech recognition unavailable.');
+  }}
 }}
 
-function stopMic() {{
-  if (recog) {{ try {{ recog.stop(); }} catch(e) {{}} recog = null; }}
-  isListening = false;
-  document.getElementById('voice-fab').classList.remove('listening');
-  document.getElementById('mic-btn').classList.remove('active');
+function stopListening() {{
+  if (recognition && isListening) {{
+    recognition.stop();
+    recognition = null;
+    isListening = false;
+  }}
+
+  document.getElementById('voice-fab').classList.remove('recording');
+  document.getElementById('mic-btn').classList.remove('recording');
   document.getElementById('mic-label').textContent = 'Tap to speak';
-  document.getElementById('mic-icon').textContent = '🎤';
+  document.getElementById('mic-icon').textContent = '&#x1F3A4;';
 }}
 
-// Preload voices
-window.speechSynthesis && window.speechSynthesis.getVoices();
+async function sendTextToBackend(text) {{
+  resetSteps();
+  document.getElementById('finn-response').classList.remove('show');
+  document.getElementById('spinner').classList.add('show');
+  setStep('step-bedrock', 'active');
+  document.getElementById('mic-status').textContent = '';
+
+  const endpoint = BACKEND + '/query';
+  try {{
+    console.log('Fetch backend endpoint', endpoint);
+    const res = await fetch(endpoint, {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ text }})
+    }});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Backend error');
+
+    setStep('step-bedrock', 'done');
+    setStep('step-bunq', 'active');
+    document.getElementById('mic-status').textContent = '&#x1F3E6; Executing bunq action&#x2026;';
+    await new Promise(r => setTimeout(r, 400));
+
+    showResponse(data.response);
+  }} catch(e) {{
+    showError(e.message + ' — ' + endpoint);
+  }}
+}}
 </script>
 
 </body>
