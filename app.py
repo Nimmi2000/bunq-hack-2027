@@ -496,11 +496,9 @@ body {{
 
     <!-- Mic button — Web Speech API -->
     <button class="mic-btn" id="mic-btn" onclick="toggleListening()">
-      <span id="mic-icon">&#x1F3A4;</span>
       <span id="mic-label">Tap to speak</span>
     </button>
     <div id="mic-status"></div>
-    <div id="mic-transcript"></div>
 
     <!-- Text input fallback -->
     <div class="input-row">
@@ -598,6 +596,7 @@ function closeVoice() {{
 
 // ── Show response + TTS ───────────────────────────────────────────────────────
 function showResponse(text) {{
+  stopListening();
   document.getElementById('spinner').classList.remove('show');
   let display = text;
   if (typeof text === 'object' && text !== null) {{
@@ -668,7 +667,6 @@ function startListening() {{
 
   stopRequested = false;
   accumulatedTranscript = '';
-  document.getElementById('mic-transcript').textContent = '';
   recognition = new SpeechRecognition();
   recognition.continuous = true;
   recognition.interimResults = true;
@@ -681,8 +679,7 @@ function startListening() {{
     document.getElementById('voice-fab').classList.add('recording');
     document.getElementById('mic-btn').classList.add('recording');
     document.getElementById('mic-label').textContent = 'Listening...';
-    document.getElementById('mic-icon').textContent = '&#x23F3;';
-    document.getElementById('mic-status').textContent = 'Say your request now.';
+    document.getElementById('mic-status').textContent = '';
     document.getElementById('finn-response').classList.remove('show');
   }};
 
@@ -700,20 +697,12 @@ function startListening() {{
           stopListening();
           return;
         }}
-        document.getElementById('mic-transcript').textContent = fullText;
         if (fullText) {{
           await sendTextToBackend(fullText);
         }}
       }} else {{
         interimTranscript += resultText + ' ';
       }}
-    }}
-    const displayText = (accumulatedTranscript + interimTranscript).trim();
-    document.getElementById('mic-status').textContent = displayText
-      ? 'Listening... ' + displayText
-      : 'Listening...';
-    if (interimTranscript) {{
-      document.getElementById('mic-transcript').textContent = interimTranscript.trim();
     }}
   }};
 
@@ -734,7 +723,6 @@ function startListening() {{
       document.getElementById('voice-fab').classList.remove('recording');
       document.getElementById('mic-btn').classList.remove('recording');
       document.getElementById('mic-label').textContent = 'Tap to speak';
-      document.getElementById('mic-icon').textContent = '&#x1F3A4;';
       recognition = null;
       return;
     }}
@@ -766,7 +754,6 @@ function stopListening() {{
     document.getElementById('voice-fab').classList.remove('recording');
     document.getElementById('mic-btn').classList.remove('recording');
     document.getElementById('mic-label').textContent = 'Tap to speak';
-    document.getElementById('mic-icon').textContent = '&#x1F3A4;';
   }}
 }}
 
@@ -790,7 +777,7 @@ async function sendTextToBackend(text) {{
 
     setStep('step-bedrock', 'done');
     setStep('step-bunq', 'active');
-    document.getElementById('mic-status').textContent = '&#x1F3E6; Executing bunq action&#x2026;';
+    document.getElementById('mic-status').textContent = 'Executing bunq action...';
     await new Promise(r => setTimeout(r, 400));
 
     showResponse(data.response);
