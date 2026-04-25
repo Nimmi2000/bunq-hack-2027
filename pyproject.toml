@@ -16,4 +16,9 @@ dependencies = [
   "cryptography>=41.0.0",
   "aws-sdk-bedrock-runtime>=0.5.0",
   "smithy-aws-core>=0.5.0",
+  # fraud detection
+  "anthropic>=0.30.0",
+  "opencv-python-headless>=4.9.0",
+  "numpy>=1.26.0",
+  "Pillow>=10.0.0",
 ]

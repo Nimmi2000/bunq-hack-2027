@@ -26,6 +26,14 @@ _SANDBOX_IBAN_CACHE: dict[str, str] = {}   # name  → IBAN
 _SANDBOX_NAME_CACHE: dict[str, str] = {}   # IBAN  → display name
 
 
+def _fmt_amount(amount) -> str:
+    """Ensure amount is a string with exactly 2 decimal places as bunq requires."""
+    try:
+        return f"{float(str(amount).replace(',', '.')):.2f}"
+    except (ValueError, TypeError):
+        return "0.00"
+
+
 def _sandbox_recipient_iban(name: str) -> str:
     """Create a fresh sandbox user and return their IBAN (cached per name)."""
     key = name.strip().lower()
@@ -36,15 +44,21 @@ def _sandbox_recipient_iban(name: str) -> str:
     c = BunqClient(api_key=api_key, sandbox=True)
     c.authenticate()
 
-    raw = c.get(f"user/{c.user_id}/monetary-account")
-    for item in raw:
-        for acc in item.values():
-            for alias in acc.get("alias", []):
-                if alias.get("type") == "IBAN":
-                    iban = alias["value"]
-                    _SANDBOX_IBAN_CACHE[key] = iban
-                    _SANDBOX_NAME_CACHE[iban] = name.strip()  # remember the real name
-                    return iban
+    for endpoint in (f"user/{c.user_id}/monetary-account", f"user/{c.user_id}/monetary-account-bank"):
+        try:
+            raw = c.get(endpoint)
+        except Exception:
+            continue
+        for item in raw:
+            for acc in item.values():
+                if not isinstance(acc, dict):
+                    continue
+                for alias in acc.get("alias", []):
+                    if alias.get("type") in ("IBAN", "BANK_TRANSFER_IBAN"):
+                        iban = alias["value"]
+                        _SANDBOX_IBAN_CACHE[key] = iban
+                        _SANDBOX_NAME_CACHE[iban] = name.strip()
+                        return iban
 
     raise RuntimeError("Could not retrieve IBAN for sandbox recipient")
 
@@ -126,10 +140,11 @@ def make_payment(
     else:
         counterparty = {"type": "EMAIL", "value": recipient_email, "name": recipient_name or recipient_email}
 
+    amount = _fmt_amount(amount)
     resp = c.post(
         f"user/{c.user_id}/monetary-account/{account_id}/payment",
         {
-            "amount": {"value": str(amount), "currency": currency},
+            "amount": {"value": amount, "currency": currency},
             "counterparty_alias": counterparty,
             "description": description,
         },
@@ -172,10 +187,11 @@ def request_money(
     else:
         counterparty = {"type": "EMAIL", "value": counterparty_email, "name": counterparty_name or counterparty_email}
 
+    amount = _fmt_amount(amount)
     resp = c.post(
         f"user/{c.user_id}/monetary-account/{account_id}/request-inquiry",
         {
-            "amount_inquired": {"value": str(amount), "currency": currency},
+            "amount_inquired": {"value": amount, "currency": currency},
             "counterparty_alias": counterparty,
             "description": description,
             "allow_bunqme": False,
@@ -200,11 +216,12 @@ def create_payment_link(amount: str, currency: str, description: str) -> dict:
     c = _client()
     account_id = c.get_primary_account_id()
 
+    amount = _fmt_amount(amount)
     resp = c.post(
         f"user/{c.user_id}/monetary-account/{account_id}/bunqme-tab",
         {
             "bunqme_tab_entry": {
-                "amount_inquired": {"value": str(amount), "currency": currency},
+                "amount_inquired": {"value": amount, "currency": currency},
                 "description": description,
             }
         },

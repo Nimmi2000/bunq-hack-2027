@@ -33,7 +33,12 @@ def _backend_running() -> bool:
 
 def _start_backend() -> None:
     if not _backend_running():
-        uvicorn.run(backend.app, host="0.0.0.0", port=BACKEND_PORT, log_level="error")
+        try:
+            uvicorn.run(backend.app, host="0.0.0.0", port=BACKEND_PORT, log_level="info")
+        except Exception as exc:
+            import traceback
+            print(f"[Finn] Backend failed to start: {exc}")
+            traceback.print_exc()
 
 
 if "backend_thread_started" not in st.session_state:
@@ -383,6 +388,76 @@ body {{
 .step.active  {{ background: #1a0f2e; color: #a78bfa; border-color: #7c3aed44; }}
 .step.done    {{ background: #0a1a0a; color: #22c55e; border-color: #22c55e44; }}
 .step.error   {{ background: #1a0a0a; color: #f87171; border-color: #dc262644; }}
+
+/* ── Camera preview ── */
+#camera-section {{
+  display: none;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+  position: relative;
+}}
+#camera-preview {{
+  width: 100%; height: 80px;
+  object-fit: cover; display: block;
+  background: #111;
+}}
+.cam-badge {{
+  position: absolute; bottom: 4px; right: 6px;
+  font-size: 9px; background: rgba(0,0,0,.75);
+  color: #22c55e; padding: 2px 6px; border-radius: 4px;
+  font-weight: 700; letter-spacing: .5px;
+}}
+
+/* ── Risk analysis debug panel ── */
+#risk-panel {{
+  margin-top: 8px;
+  background: #0e0e1a;
+  border: 1px solid #2a2a4a;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: none;
+}}
+.risk-header {{ font-size: 10px; font-weight: 700; color: #a78bfa; letter-spacing: 1px; margin-bottom: 6px; }}
+.risk-bar-wrap {{ background: #1e1e1e; border-radius: 6px; height: 8px; overflow: hidden; margin-bottom: 6px; }}
+#risk-bar {{ height: 100%; width: 0%; border-radius: 6px; transition: width .5s, background .5s; }}
+.risk-meta {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }}
+#risk-rec {{ font-size: 11px; font-weight: 700; letter-spacing: .5px; }}
+#risk-score-text {{ font-size: 11px; color: #666; }}
+#risk-reason {{ font-size: 11px; color: #888; margin-bottom: 6px; line-height: 1.4; }}
+.risk-toggle-btn {{
+  font-size: 10px; color: #555; cursor: pointer;
+  background: none; border: none; padding: 0;
+  text-decoration: underline; display: block; margin-bottom: 4px;
+}}
+#risk-details-body {{
+  display: none; margin-top: 4px;
+  font-size: 10px; color: #666; line-height: 1.7;
+  font-family: 'Courier New', monospace;
+  white-space: pre-wrap; word-break: break-all;
+}}
+
+/* ── Floating fraud panel (always visible, outside modal) ── */
+#risk-float {{
+  position: fixed; top: 16px; right: 16px;
+  width: 260px;
+  background: #0e0e1a;
+  border: 1px solid #3a2a6a;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: none; z-index: 400;
+  box-shadow: 0 8px 30px rgba(0,0,0,.75);
+}}
+#risk-float .rf-header {{ font-size: 10px; font-weight: 700; color: #a78bfa; letter-spacing: 1px; margin-bottom: 6px; }}
+#risk-float .rf-bar-wrap {{ background: #1a1a1a; border-radius: 6px; height: 8px; overflow: hidden; margin-bottom: 6px; }}
+#risk-float-bar {{ height: 100%; width: 0%; border-radius: 6px; transition: width .5s, background .5s; }}
+#risk-float .rf-meta {{ display: flex; justify-content: space-between; margin-bottom: 4px; }}
+#risk-float-rec {{ font-size: 14px; font-weight: 800; }}
+#risk-float-score {{ font-size: 11px; color: #666; }}
+#risk-float-reason {{ font-size: 11px; color: #aaa; line-height: 1.5; margin-bottom: 6px; }}
+#risk-float-signals {{ font-size: 10px; color: #666; font-family: monospace; white-space: pre-wrap; display: none; }}
+.rf-toggle {{ font-size: 10px; color: #555; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -486,12 +561,21 @@ body {{
     <div class="modal-tag">&#x2736; FINN VOICE</div>
     <div class="modal-title">Ask Finn</div>
     <div class="modal-sub">Tap the mic and speak, or type your request.</div>
+    <div id="backend-status" style="font-size:10px;color:#555;margin-bottom:6px;">Connecting to backend&#x2026;</div>
+
+    <!-- Camera preview — inline in modal, hidden until camera is active -->
+    <div id="camera-section">
+      <video id="camera-preview" autoplay muted playsinline></video>
+      <div class="cam-badge">&#x1F7E2; LIVE</div>
+    </div>
+    <canvas id="capture-canvas" style="display:none;"></canvas>
 
     <!-- Pipeline steps -->
     <div class="steps">
       <span class="step" id="step-mic">&#x1F3A4; Voice</span>
       <span class="step" id="step-bedrock">&#x1F916; Bedrock</span>
       <span class="step" id="step-bunq">&#x1F3E6; bunq</span>
+      <span class="step" id="step-risk">&#x1F6E1;&#xFE0F; Risk</span>
     </div>
 
     <!-- Mic button — Web Speech API -->
@@ -516,7 +600,33 @@ body {{
       <div class="finn-name">FINN</div>
       <div id="finn-text"></div>
     </div>
+
+    <!-- Risk Analysis Debug Panel (demo mode only) -->
+    <div id="risk-panel">
+      <div class="risk-header">&#x26A0;&#xFE0F; FRAUD ANALYSIS</div>
+      <div class="risk-bar-wrap"><div id="risk-bar"></div></div>
+      <div class="risk-meta">
+        <span id="risk-rec">--</span>
+        <span id="risk-score-text">0%</span>
+      </div>
+      <div id="risk-reason"></div>
+      <button class="risk-toggle-btn" onclick="toggleRiskDetails()">Show signals &#x25BE;</button>
+      <div id="risk-details-body"></div>
+    </div>
   </div>
+</div>
+
+<!-- Floating fraud analysis panel — visible at all times, top-right -->
+<div id="risk-float">
+  <div class="rf-header">&#x26A0;&#xFE0F; FRAUD ANALYSIS</div>
+  <div class="rf-bar-wrap"><div id="risk-float-bar"></div></div>
+  <div class="rf-meta">
+    <span id="risk-float-rec">--</span>
+    <span id="risk-float-score">0%</span>
+  </div>
+  <div id="risk-float-reason"></div>
+  <button class="rf-toggle" onclick="document.getElementById('risk-float-signals').style.display=document.getElementById('risk-float-signals').style.display==='block'?'none':'block'">Signals &#x25BE;</button>
+  <div id="risk-float-signals"></div>
 </div>
 
 <script>
@@ -555,6 +665,8 @@ function getBackendOrigin() {{
   }}
 }}
 const BACKEND = getBackendOrigin();
+let cameraStream = null;
+let cameraPopup  = null;
 const SESSION_ID_KEY = 'finnSessionId';
 let SESSION_ID = localStorage.getItem(SESSION_ID_KEY);
 if (!SESSION_ID) {{
@@ -564,7 +676,7 @@ if (!SESSION_ID) {{
 console.log('Finn BACKEND endpoint:', BACKEND, 'session:', SESSION_ID);
 
 // ── Pipeline step indicator helpers ──────────────────────────────────────────
-const STEPS = ['step-mic','step-bedrock','step-bunq'];
+const STEPS = ['step-mic','step-bedrock','step-bunq','step-risk'];
 function setStep(id, state) {{
   const el = document.getElementById(id);
   if (el) el.className = 'step ' + state;
@@ -582,15 +694,197 @@ function allStepsDone() {{
   }});
 }}
 
+// ── Camera helpers ────────────────────────────────────────────────────────────
+async function initCamera() {{
+  const video = document.getElementById('camera-preview');
+  if (!video) return;
+  if (cameraStream) {{ openCameraWindow(); return; }}
+  try {{
+    cameraStream = await navigator.mediaDevices.getUserMedia({{
+      video: {{ width: 320, height: 240, facingMode: 'user' }}, audio: false
+    }});
+    video.srcObject = cameraStream;
+    await video.play();
+    document.getElementById('camera-section').style.display = 'block';
+    openCameraWindow();
+  }} catch (e) {{
+    console.warn('Camera unavailable:', e);
+  }}
+}}
+
+function openCameraWindow() {{
+  if (cameraPopup && !cameraPopup.closed) return;
+  cameraPopup = window.open('', 'FinnCamera', 'width=840,height=420,top=60,left=60,resizable=yes');
+  if (!cameraPopup) {{ return; }}
+
+  // Build HTML using an array of double-quoted strings — no \' issues
+  var parts = [
+    "<!DOCTYPE html><html><head><title>Finn Identity Verification</title>",
+    "<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{background:#0a0a0a;font-family:sans-serif;display:flex;flex-direction:column;height:100vh}}.panels{{display:flex;flex:1;gap:2px;background:#1a1a1a}}.panel{{flex:1;display:flex;flex-direction:column;overflow:hidden}}.lbl{{font-size:11px;font-weight:700;letter-spacing:1px;padding:6px 10px;text-align:center}}.ll{{background:#052e16;color:#22c55e}}.rl{{background:#1e1b4b;color:#a78bfa}}video{{width:100%;flex:1;object-fit:cover;display:block}}img.ri{{width:100%;flex:1;object-fit:cover;display:block}}.ph{{flex:1;display:flex;align-items:center;justify-content:center;color:#555;font-size:13px}}.st{{font-size:11px;padding:5px 10px;background:#111;color:#555;text-align:center;border-top:1px solid #222}}</style>",
+    "</head><body>",
+    "<div class=panels><div class=panel><div class='lbl ll'>LIVE CAMERA</div><video id=v autoplay muted playsinline></video></div>",
+    "<div class=panel><div class='lbl rl'>ENROLLED REFERENCE</div><div id=rw class=ph>Loading...</div></div></div>",
+    "<div class=st id=st>Captured once per transaction</div>",
+    "</body></html>"
+  ];
+  cameraPopup.document.open();
+  cameraPopup.document.write(parts.join(""));
+  cameraPopup.document.close();
+
+  // Wire the existing camera stream — no second getUserMedia needed
+  var vid = cameraPopup.document.getElementById("v");
+  if (vid && cameraStream) vid.srcObject = cameraStream;
+
+  // Fetch enrolled reference image and inject via DOM (no innerHTML string issues)
+  fetch(BACKEND + "/debug/enrolled/eva")
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (!cameraPopup || cameraPopup.closed) return;
+      var wrap = cameraPopup.document.getElementById("rw");
+      var st   = cameraPopup.document.getElementById("st");
+      if (d.image_b64) {{
+        var img = cameraPopup.document.createElement("img");
+        img.className = "ri";
+        img.src = "data:image/jpeg;base64," + d.image_b64;
+        wrap.textContent = "";
+        wrap.appendChild(img);
+        if (st) st.textContent = "Reference: " + (d.method || "local") + (d.face_id ? " | face_id: " + d.face_id : " | Claude Vision");
+      }} else {{
+        wrap.textContent = "No reference image stored";
+      }}
+    }})
+    .catch(function(e) {{ console.warn("Could not load enrolled image:", e); }});
+}}
+
+function stopCamera() {{
+  if (cameraStream) {{
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }}
+  if (cameraPopup && !cameraPopup.closed) cameraPopup.close();
+  cameraPopup = null;
+  const cs = document.getElementById('camera-section');
+  if (cs) cs.style.display = 'none';
+}}
+
+async function captureFrame() {{
+  const video  = document.getElementById('camera-preview');
+  const canvas = document.getElementById('capture-canvas');
+  if (!video || !canvas || !cameraStream || video.readyState < 2 || video.videoWidth === 0) return null;
+  canvas.width  = video.videoWidth  || 320;
+  canvas.height = video.videoHeight || 240;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+}}
+
+function isPaymentIntent(text) {{
+  return /(send|pay|transfer|payment|request|invoice|charge|link)/i.test(text);
+}}
+
+// ── Risk panel helpers ────────────────────────────────────────────────────────
+function updateRiskPanel(risk) {{
+  const panel = document.getElementById('risk-panel');
+  if (!panel || !risk) return;
+
+  const score = risk.risk_score || 0;
+  const rec   = risk.recommendation || 'ALLOW';
+  const REC_COLORS = {{
+    ALLOW: '#22c55e', CHALLENGE: '#eab308',
+    HOLD:  '#f97316', REVIEW:    '#ef4444', BLOCK: '#dc2626'
+  }};
+  const color = REC_COLORS[rec] || '#666';
+
+  const bar = document.getElementById('risk-bar');
+  if (bar) {{ bar.style.width = (score * 100).toFixed(0) + '%'; bar.style.background = color; }}
+
+  const recEl = document.getElementById('risk-rec');
+  if (recEl) {{ recEl.textContent = rec; recEl.style.color = color; }}
+
+  const scoreEl = document.getElementById('risk-score-text');
+  if (scoreEl) scoreEl.textContent = (score * 100).toFixed(0) + '% risk';
+
+  const reasonEl = document.getElementById('risk-reason');
+  if (reasonEl) reasonEl.textContent = risk.reason || '';
+
+  const body = document.getElementById('risk-details-body');
+  if (body && risk.signals) {{
+    const active = Object.entries(risk.signals)
+      .filter(([, v]) => v)
+      .map(([k]) => '• ' + k.replace(/_/g, ' '));
+    body.textContent = active.length ? active.join('\\n') : '(no active signals)';
+    if (risk.details && risk.details.face_match) {{
+      const fm = risk.details.face_match;
+      body.textContent += '\\n\\nFace match: ' + (fm.matched ? '✓ ' + fm.similarity + '%' : '✗ no match');
+    }}
+  }}
+
+  panel.style.display = 'block';
+
+  // ── Also drive the always-visible floating panel ──
+  const fp = document.getElementById('risk-float');
+  if (fp) {{
+    const fb = document.getElementById('risk-float-bar');
+    if (fb) {{ fb.style.width = (score * 100).toFixed(0) + '%'; fb.style.background = color; }}
+    const fr = document.getElementById('risk-float-rec');
+    if (fr) {{ fr.textContent = rec; fr.style.color = color; }}
+    const fs = document.getElementById('risk-float-score');
+    if (fs) fs.textContent = (score * 100).toFixed(0) + '% risk';
+    const freason = document.getElementById('risk-float-reason');
+    if (freason) freason.textContent = risk.reason || '';
+    const fsig = document.getElementById('risk-float-signals');
+    if (fsig && risk.signals) {{
+      const active = Object.entries(risk.signals).filter(([,v])=>v).map(([k])=>'• '+k.replace(/_/g,' '));
+      fsig.textContent = active.length ? active.join('\\n') : '(no active signals)';
+    }}
+    fp.style.display = 'block';
+  }}
+}}
+
+function toggleRiskDetails() {{
+  const body = document.getElementById('risk-details-body');
+  const btn  = document.querySelector('.risk-toggle-btn');
+  if (!body) return;
+  const open = body.style.display === 'block';
+  body.style.display = open ? 'none' : 'block';
+  if (btn) btn.textContent = open ? 'Show signals ▾' : 'Hide signals ▴';
+}}
+
+// ── Backend health check ──────────────────────────────────────────────────────
+async function checkBackend() {{
+  const el = document.getElementById('backend-status');
+  if (!el) return;
+  try {{
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const r = await fetch(BACKEND + '/health', {{ signal: ctrl.signal }});
+    clearTimeout(timer);
+    const d = await r.json();
+    el.textContent = '✓ Backend connected · ' + (d.bedrock_model || '');
+    el.style.color = '#22c55e';
+  }} catch (e) {{
+    el.textContent = '✗ Backend offline — refresh the page';
+    el.style.color = '#f87171';
+  }}
+}}
+
 // ── Modal open/close ──────────────────────────────────────────────────────────
 function openVoice() {{
   document.getElementById('voice-modal').classList.add('open');
   resetSteps();
-  document.getElementById('finn-input').focus();
-  if (!isListening) startListening();
+  setTimeout(() => document.getElementById('finn-input').focus(), 100);
+  checkBackend();
+  // Request camera permission immediately on open (works on Chrome/localhost)
+  initCamera();
+  // Pre-request mic permission so the browser prompt appears on startup
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {{
+    navigator.mediaDevices.getUserMedia({{ audio: true }})
+      .then(s => s.getTracks().forEach(t => t.stop()))
+      .catch(e => console.warn('Mic permission denied:', e));
+  }}
 }}
 function closeVoice() {{
   stopListening();
+  stopCamera();
   document.getElementById('voice-modal').classList.remove('open');
 }}
 
@@ -599,8 +893,15 @@ function showResponse(text) {{
   document.getElementById('spinner').classList.remove('show');
   let display = text;
   if (typeof text === 'object' && text !== null) {{
-    if (text.message) display = text.message;
-    else display = JSON.stringify(text, null, 2);
+    if (text.message) {{
+      display = text.message;
+    }} else if (text.error) {{
+      const tool = text.tool ? ' (' + text.tool.replace(/_/g, ' ') + ')' : '';
+      const detail = text.details ? ': ' + text.details : '';
+      display = text.error + tool + detail;
+    }} else {{
+      display = JSON.stringify(text, null, 2);
+    }}
   }}
   document.getElementById('finn-text').textContent = display;
   document.getElementById('finn-response').classList.add('show');
@@ -634,7 +935,8 @@ function speak(text) {{
   window.speechSynthesis.speak(utt);
 }}
 window.speechSynthesis && window.speechSynthesis.getVoices();
-window.addEventListener('load', () => {{ setTimeout(() => openVoice(), 800); }});
+// Auto-open modal but do NOT auto-start mic or camera (both need user gesture)
+window.addEventListener('load', () => {{ setTimeout(() => openVoice(), 600); }});
 
 // ── Text query → /query endpoint ─────────────────────────────────────────────
 async function askFinnText() {{
@@ -642,6 +944,7 @@ async function askFinnText() {{
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
+  if (!cameraStream) initCamera();  // user gesture — request camera permission
   await sendTextToBackend(text);
 }}
 
@@ -653,6 +956,7 @@ let stopRequested = false;
 let accumulatedTranscript = '';
 
 function toggleListening() {{
+  if (!cameraStream) initCamera();   // first mic click = user gesture → request camera
   if (isListening) stopListening();
   else             startListening();
 }}
@@ -759,28 +1063,66 @@ function stopListening() {{
 async function sendTextToBackend(text) {{
   resetSteps();
   document.getElementById('finn-response').classList.remove('show');
+  document.getElementById('risk-panel') && (document.getElementById('risk-panel').style.display = 'none');
   document.getElementById('spinner').classList.add('show');
-  setStep('step-bedrock', 'active');
   document.getElementById('mic-status').textContent = '';
 
-  const endpoint = BACKEND + '/query';
-  try {{
-    console.log('Fetch backend endpoint', endpoint);
-    const res = await fetch(endpoint, {{
+  let endpoint, fetchOptions;
+
+  if (isPaymentIntent(text)) {{
+    // All payment intents must go through /query-with-frame so fraud check is enforced
+    setStep('step-risk', 'active');
+    const frameBlob = cameraStream ? await captureFrame() : null;
+    const formData = new FormData();
+    formData.append('text', text);
+    formData.append('session_id', SESSION_ID);
+    if (frameBlob) formData.append('frame', frameBlob, 'frame.jpg');
+    endpoint    = BACKEND + '/query-with-frame';
+    fetchOptions = {{ method: 'POST', body: formData }};
+  }} else {{
+    endpoint    = BACKEND + '/query';
+    fetchOptions = {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ text, session_id: SESSION_ID }})
-    }});
+      body: JSON.stringify({{ text, session_id: SESSION_ID }}),
+    }};
+  }}
+
+  setStep('step-bedrock', 'active');
+
+  try {{
+    console.log('Fetch', endpoint);
+    const res  = await fetch(endpoint, fetchOptions);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Backend error');
 
-    setStep('step-bedrock', 'done');
-    setStep('step-bunq', 'active');
-    document.getElementById('mic-status').textContent = 'Executing bunq action...';
-    await new Promise(r => setTimeout(r, 400));
+    // Risk step feedback
+    if (data.risk) {{
+      const rec = data.risk.recommendation || 'ALLOW';
+      const stepState = rec === 'ALLOW' ? 'done' : rec === 'BLOCK' ? 'error' : 'active';
+      setStep('step-risk', stepState);
+      updateRiskPanel(data.risk);
+    }} else {{
+      setStep('step-risk', 'done');
+    }}
 
+    setStep('step-bedrock', 'done');
+
+    if (data.status === 'blocked' || data.status === 'held') {{
+      document.getElementById('spinner').classList.remove('show');
+      document.getElementById('finn-text').textContent = data.response;
+      document.getElementById('finn-response').classList.add('show');
+      setStep('step-bedrock', 'done');
+      setStep('step-bunq', data.status === 'blocked' ? 'error' : 'active');
+      speak(data.response);
+      return;
+    }}
+
+    setStep('step-bunq', 'active');
+    document.getElementById('mic-status').textContent = 'Executing bunq action…';
+    await new Promise(r => setTimeout(r, 400));
     showResponse(data.response);
-  }} catch(e) {{
+  }} catch (e) {{
     showError(e.message + ' — ' + endpoint);
   }}
 }}
@@ -789,4 +1131,4 @@ async function sendTextToBackend(text) {{
 </body>
 </html>"""
 
-components.html(HTML, height=820, scrolling=False)
+components.html(HTML, height=920, scrolling=False)

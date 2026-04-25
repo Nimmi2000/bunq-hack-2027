@@ -622,7 +622,12 @@ def _normalize_money_fields(tool: str, tool_input: dict, transcript: str | None 
             normalized["currency"] = "EUR"
         if "amount" in normalized:
             amount = str(normalized["amount"]).strip()
-            amount = amount.replace("€", "").replace("eur", "").replace("EUR", "").strip()
+            amount = amount.replace("€", "").replace("eur", "").replace("EUR", "").replace(",", ".").strip()
+            try:
+                # bunq requires exactly 2 decimal places, e.g. "50.00" not "50" or "50.0"
+                amount = f"{float(amount):.2f}"
+            except (ValueError, TypeError):
+                pass
             normalized["amount"] = amount
 
     if transcript:
@@ -769,6 +774,9 @@ def parse_and_execute(transcript: str, session_id: str | None = None) -> object:
         else:
             plan_source = "model"
 
+    if not plan:
+        plan = {"tool": "none", "input": {}, "reply": ""}
+
     tool = plan.get("tool", "none") or "none"
     tool_input = plan.get("input", {}) or {}
     reply = plan.get("reply", "").strip()
@@ -820,21 +828,26 @@ def parse_and_execute(transcript: str, session_id: str | None = None) -> object:
             _save_session_state(session_id, tool, tool_input, pending=False)
     except TypeError as exc:
         return {
-            "error": "Invalid tool input",
+            "error": f"Could not complete {tool.replace('_', ' ')}: missing required fields.",
             "details": str(exc),
             "tool": tool,
-            "tool_input": tool_input,
-            "plan_source": plan_source,
-            "raw_model_output": model_output,
         }
     except Exception as exc:
+        detail = str(exc)
+        # Produce a short, readable message for common bunq errors
+        if "INSUFFICIENT_FUNDS" in detail or "insufficient" in detail.lower():
+            friendly = "Insufficient funds to complete this transaction."
+        elif "INVALID_IBAN" in detail or "iban" in detail.lower():
+            friendly = "Invalid account number for the recipient."
+        elif "authentication" in detail.lower() or "401" in detail or "403" in detail:
+            friendly = "Authentication failed — check your bunq API key."
+        elif "timeout" in detail.lower():
+            friendly = "Request timed out. Please try again."
+        else:
+            friendly = f"Could not complete {tool.replace('_', ' ')}. {detail[:120]}"
         return {
-            "error": "Error executing Bunq action",
-            "details": str(exc),
+            "error": friendly,
             "tool": tool,
-            "tool_input": tool_input,
-            "plan_source": plan_source,
-            "raw_model_output": model_output,
         }
 
     return _format_result(tool, result)
