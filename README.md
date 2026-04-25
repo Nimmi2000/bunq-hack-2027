@@ -1,6 +1,6 @@
-# Finn — AI-Driven Safe Transaction System
+# Finn 2.0 — AI-Driven Safe Transaction System
 
-Finn is not a voice banking app. It is an **AI-powered transaction protection layer** built on top of bunq that detects fraud, coercion, and identity risk in real time — before a transaction happens.
+Finn 2.0 is not a voice banking app. It is an **AI-powered transaction protection layer** built on top of bunq that detects fraud, coercion, and identity risk in real time — before a transaction happens.
 
 Built for the **bunq Hackathon 2027**.
 
@@ -20,9 +20,9 @@ The answer: only AI can listen to voice, read context, analyse behaviour, and ma
 
 ---
 
-## What Finn Does
+## What Finn 2.0 Does
 
-Finn intercepts every transaction and makes an **AI risk decision** before it executes.
+Finn 2.0 intercepts every transaction and makes an **AI risk decision** before it executes.
 
 ```
 User speaks a request
@@ -66,7 +66,7 @@ If coercion signals are detected, the transaction is paused and the user is aske
 The audio input is monitored for secondary voices — a key signal in scam and elder fraud scenarios where a fraudster coaches the victim. If a second voice is detected during a payment request, the system triggers a warning before proceeding.
 
 ### 4. Smart Transaction Risk Check
-Beyond voice signals, Finn checks the transaction itself:
+Beyond voice signals, Finn 2.0 checks the transaction itself:
 - Unusual amount relative to account history
 - First-time or high-risk recipient
 - Transaction velocity (multiple payments in a short window)
@@ -91,13 +91,13 @@ Face verification is not continuous — that would be a GDPR liability. Instead,
 
 ## Demo Scenario
 
-> Eva, 72, receives a call from a "bank employee" who asks her to transfer €3,000 to a "safe account". She opens Finn and starts speaking the transfer request.
+> Eva, 72, receives a call from a "bank employee" who asks her to transfer €3,000 to a "safe account". She opens Finn 2.0 and starts speaking the transfer request.
 
-1. Finn detects **elevated stress** in Eva's voice.
-2. Finn detects a **secondary voice** in the background.
+1. Finn 2.0 detects **elevated stress** in Eva's voice.
+2. Finn 2.0 detects a **secondary voice** in the background.
 3. The recipient is **new** and the amount is **10× her usual transfer**.
 4. Risk score: **HIGH** → transaction is **blocked**.
-5. Finn says: *"I've paused this transfer. Are you being asked to do this by someone else? You can say 'cancel' or call your bank directly."*
+5. Finn 2.0 says: *"I've paused this transfer. Are you being asked to do this by someone else? You can say 'cancel' or call your bank directly."*
 
 This is the scenario that wins the hackathon. One clear problem, one clear AI solution.
 
@@ -163,7 +163,7 @@ Frontend: **http://localhost:8501** — Backend API docs: **http://localhost:800
 
 ## Why This Wins
 
-| Criterion | How Finn meets it |
+| Criterion | How Finn 2.0 meets it |
 |---|---|
 | **Real problem** | APP fraud and elder scam coercion — billions lost annually across Europe |
 | **AI is core** | Without the risk engine, there is no product — AI is not a feature, it is the system |
