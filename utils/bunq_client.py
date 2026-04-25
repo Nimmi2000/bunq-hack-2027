@@ -154,10 +154,22 @@ class BunqClient:
     def _request(self, method: str, endpoint: str, body: dict | None = None, params: dict | None = None) -> list:
         url = f"{self.base_url}/{API_VERSION}/{endpoint}"
         headers = self._build_headers(body)
-        json_body = body if method in ("POST", "PUT") else None
 
-        resp = requests.request(method, url, headers=headers, json=json_body, params=params)
-        resp.raise_for_status()
+        if method in ("POST", "PUT") and body is not None:
+            body_bytes = json.dumps(body).encode()
+            resp = requests.request(method, url, headers=headers, data=body_bytes, params=params)
+        else:
+            resp = requests.request(method, url, headers=headers, params=params)
+
+        if not resp.ok:
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = resp.text
+            raise requests.HTTPError(
+                f"{resp.status_code} {resp.reason} for url: {resp.url} — bunq error: {detail}",
+                response=resp,
+            )
         return resp.json().get("Response", [])
 
     def _raw_post(self, endpoint: str, body: dict, auth_token: str | None) -> list:

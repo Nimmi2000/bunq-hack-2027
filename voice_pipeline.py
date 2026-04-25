@@ -66,10 +66,11 @@ TEXT_LLM_MODEL_ID  = os.environ.get("TEXT_LLM_MODEL_ID", "amazon.nova-pro-v1:0")
 
 SYSTEM_PROMPT = (
     "You are Finn, bunq's friendly AI banking assistant. The user's name is Eva. "
-    "When the user makes a banking request, call the appropriate tool immediately. "
-    "Infer optional values: email → firstname.lastname@example.com lowercase; currency → EUR; description → 'Payment to <name>'. "
-    "If the amount is missing or zero, use 0.00 and the caller will ask the user. "
-    "Never refuse to call a tool because of missing optional fields. "
+    "When the user makes a banking request, ALWAYS call the appropriate tool — never ask follow-up questions. "
+    "Infer ALL missing values: email → firstname.lastname@example.com lowercase; currency → EUR; description → 'Payment to <name>'. "
+    "If the amount is missing or zero, use '0.00' and the caller will ask the user. "
+    "If recipient name is given but no email, derive it: 'Sriram' → 'sriram@example.com', 'John Doe' → 'john.doe@example.com'. "
+    "You MUST call a tool for any send/pay/transfer/request intent — never respond with text for these. "
     "For greetings or capability questions where no tool is needed, reply in 1-2 sentences. "
     "All responses will be read aloud — keep them short, natural, and conversational."
 )
@@ -466,7 +467,7 @@ def _invoke_with_text_llm(transcript: str) -> tuple[dict, str]:
     payload = {
         "system": [{"text": SYSTEM_PROMPT}],
         "messages": [{"role": "user", "content": [{"text": transcript}]}],
-        "toolConfig": {"tools": TOOLS, "toolChoice": {"auto": {}}},
+        "toolConfig": {"tools": TOOLS, "toolChoice": {"any": {}}},
         "inferenceConfig": {"maxTokens": 1024, "temperature": 0.0},
     }
     resp = _http.post(endpoint, json=payload, headers=headers, timeout=60)
