@@ -302,29 +302,31 @@ body {{
 }}
 .modal-close:hover {{ color: #fff; background: #333; }}
 
-/* Mic button */
-.mic-btn {{
-  width: 100%;
-  background: #1e1e1e;
-  border: 1px solid #2a2a2a;
-  border-radius: 12px; color: #aaa;
-  padding: 12px; font-size: 14px; font-weight: 600;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  margin-bottom: 10px; transition: background .15s, border-color .15s;
+/* Listening waveform */
+#listening-indicator {{
+  display: flex; align-items: flex-end; justify-content: center;
+  gap: 5px; height: 52px; margin: 14px 0 10px;
 }}
-.mic-btn:hover {{ background: #222; }}
-.mic-btn.recording {{
-  background: #1a0808; border-color: #dc2626; color: #f87171;
-  animation: pulse-border 1.2s ease-in-out infinite;
+.wave-bar {{
+  width: 4px; border-radius: 2px;
+  background: linear-gradient(to top,#7c3aed,#c084fc);
+  animation: wave 1.1s ease-in-out infinite;
 }}
-@keyframes pulse-border {{
-  0%,100% {{ box-shadow: 0 0 0 0 rgba(220,38,38,.4); }}
-  50%      {{ box-shadow: 0 0 0 6px rgba(220,38,38,0); }}
+.wave-bar:nth-child(1) {{ animation-delay: 0s; }}
+.wave-bar:nth-child(2) {{ animation-delay: 0.18s; }}
+.wave-bar:nth-child(3) {{ animation-delay: 0.36s; }}
+.wave-bar:nth-child(4) {{ animation-delay: 0.18s; }}
+.wave-bar:nth-child(5) {{ animation-delay: 0s; }}
+@keyframes wave {{
+  0%,100% {{ height: 6px; opacity: .3; }}
+  50%      {{ height: 40px; opacity: 1; }}
+}}
+#listening-indicator.idle .wave-bar {{
+  animation: none; height: 4px; opacity: .15;
 }}
 
 /* Text input row */
-.input-row {{ display: flex; gap: 8px; margin-top: 10px; margin-bottom: 10px; }}
+.input-row {{ display: flex; gap: 8px; margin-top: 10px; margin-bottom: 6px; }}
 .finn-input {{
   flex: 1;
   background: #1e1e1e; border: 1px solid #333;
@@ -527,7 +529,7 @@ body {{
     <button class="modal-close" onclick="closeVoice()">&#x2715;</button>
     <div class="modal-tag">&#x2736; FINN VOICE</div>
     <div class="modal-title">Ask Finn</div>
-    <div class="modal-sub">Tap the mic and speak, or type your request.</div>
+    <div class="modal-sub">Speak your banking command.</div>
 
     <!-- Pipeline steps -->
     <div class="steps">
@@ -537,17 +539,21 @@ body {{
       <span class="step" id="step-bunq">&#x1F3E6; bunq</span>
     </div>
 
-    <!-- Mic button — Web Speech API -->
-    <button class="mic-btn" id="mic-btn" onclick="toggleListening()">
-      <span id="mic-label">Tap to speak</span>
-    </button>
+    <!-- Live listening waveform -->
+    <div id="listening-indicator" class="idle">
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+    </div>
     <div id="mic-status"></div>
 
-    <!-- Text input fallback -->
+    <!-- Text input -->
     <div class="input-row">
       <input
         class="finn-input" id="finn-input" type="text"
-        placeholder="Or type: what&#x27;s my balance? Send &#x20AC;10 to Sara&#x2026;"
+        placeholder="Or type a command&#x2026;"
         onkeydown="if(event.key==='Enter') askFinnText()"
       >
       <button class="send-btn" onclick="askFinnText()">&#x279C;</button>
@@ -641,14 +647,15 @@ function allStepsDone() {{
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 function openVoice() {{
+  stopWakeListener();
   document.getElementById('voice-modal').classList.add('open');
   resetSteps();
-  document.getElementById('finn-input').focus();
   if (!isListening) startListening();
 }}
 function closeVoice() {{
   stopListening();
   document.getElementById('voice-modal').classList.remove('open');
+  startWakeListener();
 }}
 
 // ── Show response + TTS ───────────────────────────────────────────────────────
@@ -773,6 +780,46 @@ async function captureAndVerifyFace() {{
   }}
 }}
 
+// ── Wake-word listener (background, always-on) ───────────────────────────────
+let wakeRecognition = null;
+let wakeListening   = false;
+
+function startWakeListener() {{
+  if (!SpeechRecognition || wakeListening) return;
+  wakeListening   = true;
+  wakeRecognition = new SpeechRecognition();
+  wakeRecognition.continuous    = true;
+  wakeRecognition.interimResults = false;
+  wakeRecognition.lang          = 'en-US';
+
+  wakeRecognition.onresult = event => {{
+    for (let i = event.resultIndex; i < event.results.length; i++) {{
+      if (!event.results[i].isFinal) continue;
+      const phrase = event.results[i][0].transcript.toLowerCase().trim();
+      if (phrase.includes('open voice') || phrase.includes('open finn') || phrase.includes('hey finn')) {{
+        openVoice();
+      }}
+    }}
+  }};
+
+  wakeRecognition.onend = () => {{
+    if (wakeListening) {{
+      setTimeout(() => {{ try {{ wakeRecognition.start(); }} catch(e) {{}} }}, 300);
+    }}
+  }};
+
+  wakeRecognition.onerror = () => {{}};
+  try {{ wakeRecognition.start(); }} catch(e) {{}}
+}}
+
+function stopWakeListener() {{
+  wakeListening = false;
+  if (wakeRecognition) {{
+    try {{ wakeRecognition.stop(); }} catch(e) {{}}
+    wakeRecognition = null;
+  }}
+}}
+
 async function checkFaceSetupAndInit() {{
   try {{
     const res = await fetch(BACKEND + '/face/status');
@@ -780,16 +827,16 @@ async function checkFaceSetupAndInit() {{
     if (!data.reference_set) {{
       await openFaceSetup();
     }} else {{
-      openVoice();
+      startWakeListener();
     }}
   }} catch(e) {{
-    openVoice();
+    startWakeListener();
   }}
 }}
 
 window.addEventListener('load', () => {{ setTimeout(() => checkFaceSetupAndInit(), 1000); }});
 
-// ── Text query → /query endpoint ─────────────────────────────────────────────
+// ── Text input → /query endpoint ─────────────────────────────────────────────
 async function askFinnText() {{
   const input = document.getElementById('finn-input');
   const text = input.value.trim();
@@ -800,6 +847,7 @@ async function askFinnText() {{
 
 // ── Browser speech recognition → /query endpoint ────────────────────────────
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
 let recognition = null;
 let isListening = false;
 let stopRequested = false;
@@ -830,8 +878,7 @@ function startListening() {{
     isListening = true;
     setStep('step-mic', 'active');
     document.getElementById('voice-fab').classList.add('recording');
-    document.getElementById('mic-btn').classList.add('recording');
-    document.getElementById('mic-label').textContent = 'Listening...';
+    document.getElementById('listening-indicator').classList.remove('idle');
     document.getElementById('mic-status').textContent = '';
     document.getElementById('finn-response').classList.remove('show');
   }};
@@ -844,7 +891,7 @@ function startListening() {{
         accumulatedTranscript += resultText + ' ';
         const fullText = accumulatedTranscript.trim();
         const lower = fullText.toLowerCase();
-        if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done')) {{
+        if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done') || lower.includes('close voice') || lower.includes('close finn')) {{
           closeVoice();
           return;
         }}
@@ -873,8 +920,7 @@ function startListening() {{
     if (stopRequested) {{
       isListening = false;
       document.getElementById('voice-fab').classList.remove('recording');
-      document.getElementById('mic-btn').classList.remove('recording');
-      document.getElementById('mic-label').textContent = 'Tap to speak';
+      document.getElementById('listening-indicator').classList.add('idle');
       recognition = null;
       return;
     }}
@@ -904,8 +950,7 @@ function stopListening() {{
     recognition.stop();
   }} else {{
     document.getElementById('voice-fab').classList.remove('recording');
-    document.getElementById('mic-btn').classList.remove('recording');
-    document.getElementById('mic-label').textContent = 'Tap to speak';
+    document.getElementById('listening-indicator').classList.add('idle');
   }}
 }}
 
