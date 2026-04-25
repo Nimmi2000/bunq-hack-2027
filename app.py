@@ -344,6 +344,15 @@ body {{
   font-size: 11px; color: #555;
   text-align: center; margin-bottom: 6px; min-height: 16px;
 }}
+#mic-transcript {{
+  font-size: 12px; color: #fff;
+  text-align: center; min-height: 24px;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  word-break: break-word;
+}}
 .spinner {{
   display: none; text-align: center;
   color: #666; font-size: 12px; padding: 8px 0;
@@ -491,6 +500,7 @@ body {{
       <span id="mic-label">Tap to speak</span>
     </button>
     <div id="mic-status"></div>
+    <div id="mic-transcript"></div>
 
     <!-- Text input fallback -->
     <div class="input-row">
@@ -573,6 +583,7 @@ function openVoice() {{
   document.getElementById('voice-modal').classList.add('open');
   resetSteps();
   document.getElementById('finn-input').focus();
+  if (!isListening) startListening();
 }}
 function closeVoice() {{
   stopListening();
@@ -628,6 +639,8 @@ async function askFinnText() {{
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let isListening = false;
+let stopRequested = false;
+let accumulatedTranscript = '';
 
 function toggleListening() {{
   if (isListening) stopListening();
@@ -640,9 +653,15 @@ function startListening() {{
     return;
   }}
 
+  if (isListening) return;
+
+  stopRequested = false;
+  accumulatedTranscript = '';
+  document.getElementById('mic-transcript').textContent = '';
   recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
   recognition.lang = 'en-US';
 
   recognition.onstart = () => {{
@@ -657,27 +676,61 @@ function startListening() {{
   }};
 
   recognition.onresult = async event => {{
-    const transcription = Array.from(event.results)
-      .map(r => r[0].transcript)
-      .join(' ')
-      .trim();
-
-    if (transcription) {{
-      document.getElementById('mic-status').textContent = 'Transcription complete.';
-      await sendTextToBackend(transcription);
-    }} else {{
-      showError('No speech detected.');
-      stopListening();
+    let interimTranscript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {{
+      const resultText = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {{
+        accumulatedTranscript += resultText + ' ';
+        const finalText = resultText.trim();
+        if (finalText) {{
+          document.getElementById('mic-transcript').textContent = finalText;
+          await sendTextToBackend(finalText);
+        }}
+      }} else {{
+        interimTranscript += resultText + ' ';
+      }}
+    }}
+    const displayText = (accumulatedTranscript + interimTranscript).trim();
+    document.getElementById('mic-status').textContent = displayText
+      ? 'Listening... ' + displayText
+      : 'Listening...';
+    if (interimTranscript) {{
+      document.getElementById('mic-transcript').textContent = interimTranscript.trim();
     }}
   }};
 
   recognition.onerror = event => {{
-    showError(event.error || 'Speech recognition failed.');
-    stopListening();
+    if (event.error === 'no-speech' || event.error === 'aborted') {{
+      document.getElementById('mic-status').textContent = 'No speech detected. Keep talking or tap stop and try again.';
+    }} else if (event.error === 'network') {{
+      showError('Speech recognition network error. Retrying...');
+    }} else {{
+      showError(event.error || 'Speech recognition failed.');
+      stopRequested = true;
+    }}
   }};
 
   recognition.onend = () => {{
-    if (isListening) stopListening();
+    if (stopRequested) {{
+      isListening = false;
+      document.getElementById('voice-fab').classList.remove('recording');
+      document.getElementById('mic-btn').classList.remove('recording');
+      document.getElementById('mic-label').textContent = 'Tap to speak';
+      document.getElementById('mic-icon').textContent = '&#x1F3A4;';
+      recognition = null;
+      return;
+    }}
+
+    if (isListening) {{
+      setTimeout(() => {{
+        try {{
+          recognition.start();
+        }} catch (e) {{
+          console.warn('Speech recognition restart failed:', e);
+          showError('Speech recognition stopped unexpectedly.');
+        }}
+      }}, 250);
+    }}
   }};
 
   try {{
@@ -689,15 +742,14 @@ function startListening() {{
 
 function stopListening() {{
   if (recognition && isListening) {{
+    stopRequested = true;
     recognition.stop();
-    recognition = null;
-    isListening = false;
+  }} else {{
+    document.getElementById('voice-fab').classList.remove('recording');
+    document.getElementById('mic-btn').classList.remove('recording');
+    document.getElementById('mic-label').textContent = 'Tap to speak';
+    document.getElementById('mic-icon').textContent = '&#x1F3A4;';
   }}
-
-  document.getElementById('voice-fab').classList.remove('recording');
-  document.getElementById('mic-btn').classList.remove('recording');
-  document.getElementById('mic-label').textContent = 'Tap to speak';
-  document.getElementById('mic-icon').textContent = '&#x1F3A4;';
 }}
 
 async function sendTextToBackend(text) {{
