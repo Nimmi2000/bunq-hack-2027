@@ -77,20 +77,6 @@ The assistant maintains context across turns within a session, so follow-up inst
 
 ---
 
-## Demo Scenario
-
-> Eva, 72, receives a call from a "bank employee" who asks her to transfer €3,000 to a "safe account". She opens Finn 2.0 and starts speaking the transfer request.
-
-1. Finn 2.0 detects **elevated stress** in Eva's voice.
-2. Finn 2.0 detects a **secondary voice** in the background.
-3. The recipient is **new** and the amount is **10× her usual transfer**.
-4. Risk score: **HIGH** → transaction is **blocked**.
-5. Finn 2.0 says: *"I've paused this transfer. Are you being asked to do this by someone else? You can say 'cancel' or call your bank directly."*
-
-This is the scenario that wins the hackathon. One clear problem, one clear AI solution.
-
----
-
 ## Architecture
 
 ```
