@@ -8,15 +8,7 @@ Built for the **bunq Hackathon 2027**.
 
 ## The Problem
 
-Voice banking and accessibility features are useful, but they solve the wrong problem. The real risk in digital banking is not *how* users interact — it is *whether they are safe when they do*.
-
-- Elderly and vulnerable users are targeted by scammers who walk them through forced transfers
-- Authorised push payment (APP) fraud is the fastest-growing fraud category in Europe
-- Standard authentication (PIN, face ID) confirms identity but cannot detect coercion or manipulation
-- Banks have no signal to distinguish a genuine payment from one made under pressure
-
-**Judges will ask: "Why does this need AI?"**
-The answer: only AI can listen to voice, read context, analyse behaviour, and make a risk decision in real time.
+Most banks act only after fraud has already happened—we’re building one that protects you in real time, for everyone. Our inclusive, voice-first interface makes banking accessible to all users, while AI continuously monitors voice, behaviour, and visual signals during every transaction. By detecting signs of coercion, deepfakes, and unusual activity before money leaves your account, we go beyond verifying identity to ensuring user safety—preventing scams at the moment they occur, when it matters most.
 
 ---
 
