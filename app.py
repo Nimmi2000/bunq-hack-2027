@@ -683,6 +683,12 @@ function startListening() {{
         accumulatedTranscript += resultText + ' ';
         const finalText = resultText.trim();
         if (finalText) {{
+          const lower = finalText.toLowerCase();
+          if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done')) {{
+            document.getElementById('mic-status').textContent = 'Closing voice...';
+            stopListening();
+            return;
+          }}
           document.getElementById('mic-transcript').textContent = finalText;
           await sendTextToBackend(finalText);
         }}
