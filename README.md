@@ -28,16 +28,25 @@ Finn 2.0 intercepts every transaction and makes an **AI risk decision** before i
 User speaks a request
         │
         ▼
- Risk Analysis Engine  ◄── voice tone + stress signals
-        │              ◄── multiple speaker detection
-        │              ◄── transaction pattern (amount, recipient, history)
-        │              ◄── behavioural anomalies
-        ▼
-  ALLOW / WARN / BLOCK
+STT Transcription      ◄── Web Speech API / Amazon Nova Sonic
         │
-        ├─ ALLOW  → execute transaction normally
-        ├─ WARN   → surface risk to user, require explicit confirmation
-        └─ BLOCK  → stop transaction, explain why, offer support
+        ▼
+Intent Recognition     ◄── Amazon Bedrock Nova Pro (LLM)
+        │                    extracts: action, amount, recipient
+        ▼
+Face Verification      ◄── live webcam capture
+        │              ◄── compared to stored reference image
+        │              ◄── Amazon Bedrock Nova Lite (vision model)
+        ▼
+  ALLOW / BLOCK
+        │
+        ├─ ALLOW  → execute bunq API action
+        │              ├─ make payment
+        │              ├─ request money
+        │              ├─ create payment link
+        │              ├─ list accounts & balances
+        │              └─ list transactions
+        └─ BLOCK  → reject, prompt user to retry face check
 ```
 
 This is the core product. Voice interaction and face verification are delivery mechanisms — **AI risk detection is the value**.
