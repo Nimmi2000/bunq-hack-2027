@@ -38,7 +38,7 @@ app.add_middleware(
 def health():
     return {
         "status": "ok",
-        "bedrock_model": os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0"),
+        "bedrock_model": os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-opus-4-7"),
         "s3_bucket": os.environ.get("AWS_S3_BUCKET", "(not set)"),
         "bunq_key_set": bool(os.environ.get("BUNQ_API_KEY")),
     }
@@ -50,7 +50,7 @@ def health():
 async def voice_endpoint(audio: UploadFile = File(...)):
     """
     Accept a voice recording (WebM, OGG, MP3, WAV, FLAC) and run the full pipeline:
-    Amazon Transcribe → Amazon Bedrock (tool use) → bunq API → natural language reply.
+    Amazon Transcribe → Amazon Bedrock text model → bunq API → natural language reply.
     """
     audio_bytes = await audio.read()
     if not audio_bytes:
@@ -73,6 +73,7 @@ async def voice_endpoint(audio: UploadFile = File(...)):
 
 class QueryRequest(BaseModel):
     text: str
+    session_id: str | None = None
 
 
 @app.post("/query")
@@ -84,7 +85,7 @@ def query_endpoint(body: QueryRequest):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="Empty query.")
     try:
-        result = voice_pipeline.run_text(body.text)
+        result = voice_pipeline.run_text(body.text, body.session_id)
         return {"response": result, "status": "ok"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

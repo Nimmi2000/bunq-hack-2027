@@ -22,6 +22,33 @@ def _client() -> BunqClient:
     return c
 
 
+_SANDBOX_IBAN_CACHE: dict[str, str] = {}   # name  → IBAN
+_SANDBOX_NAME_CACHE: dict[str, str] = {}   # IBAN  → display name
+
+
+def _sandbox_recipient_iban(name: str) -> str:
+    """Create a fresh sandbox user and return their IBAN (cached per name)."""
+    key = name.strip().lower()
+    if key in _SANDBOX_IBAN_CACHE:
+        return _SANDBOX_IBAN_CACHE[key]
+
+    api_key = BunqClient.create_sandbox_user()
+    c = BunqClient(api_key=api_key, sandbox=True)
+    c.authenticate()
+
+    raw = c.get(f"user/{c.user_id}/monetary-account")
+    for item in raw:
+        for acc in item.values():
+            for alias in acc.get("alias", []):
+                if alias.get("type") == "IBAN":
+                    iban = alias["value"]
+                    _SANDBOX_IBAN_CACHE[key] = iban
+                    _SANDBOX_NAME_CACHE[iban] = name.strip()  # remember the real name
+                    return iban
+
+    raise RuntimeError("Could not retrieve IBAN for sandbox recipient")
+
+
 def list_accounts() -> list[dict]:
     """Return all monetary accounts with id, description, balance, currency, and IBAN."""
     c = _client()
@@ -57,13 +84,16 @@ def list_transactions(count: int = 10) -> list[dict]:
     result = []
     for item in raw:
         p = item.get("Payment", {})
+        cp_alias = p.get("counterparty_alias", {})
+        cp_iban = cp_alias.get("iban") or cp_alias.get("value", "")
+        cp_name = _SANDBOX_NAME_CACHE.get(cp_iban) or cp_alias.get("display_name")
         result.append(
             {
                 "id": p.get("id"),
                 "date": p.get("created", "")[:19],
                 "amount": p.get("amount", {}).get("value"),
                 "currency": p.get("amount", {}).get("currency"),
-                "counterparty": p.get("counterparty_alias", {}).get("display_name"),
+                "counterparty": cp_name,
                 "description": p.get("description"),
                 "type": p.get("type"),
             }
@@ -74,25 +104,33 @@ def list_transactions(count: int = 10) -> list[dict]:
 def make_payment(
     amount: str,
     currency: str,
-    recipient_email: str,
     recipient_name: str,
-    description: str,
+    recipient_email: str | None = None,
+    description: str = "Payment from Finn",
 ) -> dict:
     """
-    Send money to a recipient identified by email address.
+    Send money to a recipient. If only recipient_name is provided, infer a sandbox email.
     Returns a confirmation dict with payment_id and status.
     """
+    if not recipient_email:
+        guessed = recipient_name.strip().lower().replace(' ', '.').replace("@", "")
+        recipient_email = f"{guessed or 'recipient'}@example.com"
+
     c = _client()
     account_id = c.get_primary_account_id()
+
+    sandbox = os.environ.get("BUNQ_SANDBOX", "true").strip().lower() not in ("false", "0")
+    if sandbox:
+        iban = _sandbox_recipient_iban(recipient_name or recipient_email or "recipient")
+        counterparty = {"type": "IBAN", "value": iban, "name": recipient_name or recipient_email}
+    else:
+        counterparty = {"type": "EMAIL", "value": recipient_email, "name": recipient_name or recipient_email}
+
     resp = c.post(
         f"user/{c.user_id}/monetary-account/{account_id}/payment",
         {
             "amount": {"value": str(amount), "currency": currency},
-            "counterparty_alias": {
-                "type": "EMAIL",
-                "value": recipient_email,
-                "name": recipient_name or recipient_email,
-            },
+            "counterparty_alias": counterparty,
             "description": description,
         },
     )
@@ -102,6 +140,7 @@ def make_payment(
         "amount": amount,
         "currency": currency,
         "recipient": recipient_name or recipient_email,
+        "recipient_email": recipient_email,
         "description": description,
         "status": "sent",
     }
@@ -110,25 +149,34 @@ def make_payment(
 def request_money(
     amount: str,
     currency: str,
-    counterparty_email: str,
     counterparty_name: str,
-    description: str,
+    counterparty_email: str | None = None,
+    description: str = "Payment request from Finn",
 ) -> dict:
     """
     Create a payment request (RequestInquiry) asking someone to pay you.
+    If only a counterparty name is provided, infer a sandbox email.
     Returns the request_id and status.
     """
+    if not counterparty_email:
+        guessed = counterparty_name.strip().lower().replace(' ', '.').replace("@", "")
+        counterparty_email = f"{guessed or 'payer'}@example.com"
+
     c = _client()
     account_id = c.get_primary_account_id()
+
+    sandbox = os.environ.get("BUNQ_SANDBOX", "true").strip().lower() not in ("false", "0")
+    if sandbox:
+        iban = _sandbox_recipient_iban(counterparty_name or counterparty_email or "payer")
+        counterparty = {"type": "IBAN", "value": iban, "name": counterparty_name or counterparty_email}
+    else:
+        counterparty = {"type": "EMAIL", "value": counterparty_email, "name": counterparty_name or counterparty_email}
+
     resp = c.post(
         f"user/{c.user_id}/monetary-account/{account_id}/request-inquiry",
         {
             "amount_inquired": {"value": str(amount), "currency": currency},
-            "counterparty_alias": {
-                "type": "EMAIL",
-                "value": counterparty_email,
-                "name": counterparty_name or counterparty_email,
-            },
+            "counterparty_alias": counterparty,
             "description": description,
             "allow_bunqme": False,
         },

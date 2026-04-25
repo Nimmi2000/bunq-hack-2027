@@ -557,7 +557,13 @@ function getBackendOrigin() {{
   }}
 }}
 const BACKEND = getBackendOrigin();
-console.log('Finn BACKEND endpoint:', BACKEND);
+const SESSION_ID_KEY = 'finnSessionId';
+let SESSION_ID = localStorage.getItem(SESSION_ID_KEY);
+if (!SESSION_ID) {{
+  SESSION_ID = (crypto.randomUUID ? crypto.randomUUID() : 'finn-' + Math.random().toString(36).slice(2));
+  localStorage.setItem(SESSION_ID_KEY, SESSION_ID);
+}}
+console.log('Finn BACKEND endpoint:', BACKEND, 'session:', SESSION_ID);
 
 // ── Pipeline step indicator helpers ──────────────────────────────────────────
 const STEPS = ['step-mic','step-bedrock','step-bunq'];
@@ -593,11 +599,16 @@ function closeVoice() {{
 // ── Show response + TTS ───────────────────────────────────────────────────────
 function showResponse(text) {{
   document.getElementById('spinner').classList.remove('show');
-  document.getElementById('finn-text').textContent = text;
+  let display = text;
+  if (typeof text === 'object' && text !== null) {{
+    if (text.message) display = text.message;
+    else display = JSON.stringify(text, null, 2);
+  }}
+  document.getElementById('finn-text').textContent = display;
   document.getElementById('finn-response').classList.add('show');
   document.getElementById('mic-status').textContent = '';
   allStepsDone();
-  speak(text);
+  speak(display);
 }}
 
 function showError(msg) {{
@@ -681,16 +692,17 @@ function startListening() {{
       const resultText = event.results[i][0].transcript;
       if (event.results[i].isFinal) {{
         accumulatedTranscript += resultText + ' ';
-        const finalText = resultText.trim();
-        if (finalText) {{
-          const lower = finalText.toLowerCase();
-          if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done')) {{
-            document.getElementById('mic-status').textContent = 'Closing voice...';
-            stopListening();
-            return;
-          }}
-          document.getElementById('mic-transcript').textContent = finalText;
-          await sendTextToBackend(finalText);
+        const fullText = accumulatedTranscript.trim();
+        const lower = fullText.toLowerCase();
+        if (lower.includes('i am done') || lower.includes("i'm done") || lower.includes('im done') || lower.includes('i am finished') || lower.includes('i m done')) {{
+          document.getElementById('mic-status').textContent = 'Closing voice...';
+          await sendTextToBackend(fullText);
+          stopListening();
+          return;
+        }}
+        document.getElementById('mic-transcript').textContent = fullText;
+        if (fullText) {{
+          await sendTextToBackend(fullText);
         }}
       }} else {{
         interimTranscript += resultText + ' ';
@@ -771,7 +783,7 @@ async function sendTextToBackend(text) {{
     const res = await fetch(endpoint, {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ text }})
+      body: JSON.stringify({{ text, session_id: SESSION_ID }})
     }});
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Backend error');
