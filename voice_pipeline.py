@@ -744,7 +744,7 @@ def _build_action_prompt(transcript: str) -> str:
     )
 
 
-def parse_and_execute(transcript: str, session_id: str | None = None) -> object:
+def parse_and_execute(transcript: str, session_id: str | None = None, face_verified: bool = False) -> object:
     """Text-only pipeline: model plans the Bunq action, then backend executes it."""
     session_state = _get_session_state(session_id) if session_id else None
 
@@ -815,6 +815,12 @@ def parse_and_execute(transcript: str, session_id: str | None = None) -> object:
     if session_id and tool in REQUIRED_FIELDS:
         _save_session_state(session_id, tool, tool_input, pending=True)
 
+    if not face_verified:
+        return (
+            "Face verification is required before performing banking actions. "
+            "Please look at the camera and try again."
+        )
+
     try:
         result = func(**tool_input)
         if session_id:
@@ -850,6 +856,6 @@ def run(audio_bytes: bytes, content_type: str = "audio/webm") -> str:
     return parse_and_execute(transcript)
 
 
-def run_text(text: str, session_id: str | None = None) -> object:
+def run_text(text: str, session_id: str | None = None, face_verified: bool = False) -> object:
     """Text-only pipeline (no STT): text → Bedrock text model → bunq → result."""
-    return parse_and_execute(text, session_id)
+    return parse_and_execute(text, session_id, face_verified)

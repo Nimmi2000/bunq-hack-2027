@@ -9,6 +9,7 @@ Endpoints:
   POST /query    — plain text → Bedrock + bunq → JSON
 """
 
+import base64
 import os
 
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import face_auth
 import voice_pipeline
 
 app = FastAPI(title="Finn Voice Backend", version="1.0.0")
@@ -69,11 +71,43 @@ async def voice_endpoint(audio: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Face authentication endpoints ─────────────────────────────────────────────
+
+class FaceImageRequest(BaseModel):
+    image: str  # base64-encoded JPEG bytes
+
+
+@app.get("/face/status")
+def face_status():
+    return {"reference_set": face_auth.reference_exists()}
+
+
+@app.post("/face/setup")
+def face_setup(body: FaceImageRequest):
+    try:
+        face_auth.save_reference(base64.b64decode(body.image))
+        return {"status": "ok"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/face/verify")
+def face_verify_endpoint(body: FaceImageRequest):
+    if not face_auth.reference_exists():
+        return {"match": False, "similarity": 0.0, "error": "No reference image set."}
+    try:
+        match, similarity = face_auth.verify(base64.b64decode(body.image))
+        return {"match": match, "similarity": round(similarity, 1)}
+    except Exception as exc:
+        return {"match": False, "similarity": 0.0, "error": str(exc)}
+
+
 # ── Query endpoint (text → pipeline, skipping STT) ───────────────────────────
 
 class QueryRequest(BaseModel):
     text: str
     session_id: str | None = None
+    face_verified: bool = False
 
 
 @app.post("/query")
@@ -85,7 +119,7 @@ def query_endpoint(body: QueryRequest):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="Empty query.")
     try:
-        result = voice_pipeline.run_text(body.text, body.session_id)
+        result = voice_pipeline.run_text(body.text, body.session_id, body.face_verified)
         return {"response": result, "status": "ok"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

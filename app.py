@@ -383,6 +383,48 @@ body {{
 .step.active  {{ background: #1a0f2e; color: #a78bfa; border-color: #7c3aed44; }}
 .step.done    {{ background: #0a1a0a; color: #22c55e; border-color: #22c55e44; }}
 .step.error   {{ background: #1a0a0a; color: #f87171; border-color: #dc262644; }}
+
+/* ── Face ID setup modal ── */
+#face-setup-modal {{
+  display: none;
+  position: fixed; inset: 0; z-index: 400;
+  align-items: center; justify-content: center;
+  padding: 16px;
+}}
+#face-setup-modal.open {{ display: flex; }}
+.face-sheet {{
+  position: relative;
+  width: 100%; max-width: 358px;
+  background: #161616;
+  border: 1px solid #3a2a6a;
+  border-radius: 24px;
+  padding: 20px; z-index: 1;
+  box-shadow: 0 16px 60px rgba(0,0,0,.9);
+}}
+#setup-video {{
+  width: 100%;
+  border-radius: 14px;
+  background: #0a0a0a;
+  min-height: 200px;
+  margin-bottom: 14px;
+  border: 2px solid #3a2a6a;
+  object-fit: cover;
+}}
+.face-capture-btn {{
+  width: 100%;
+  background: linear-gradient(135deg,#7c3aed,#a78bfa);
+  border: none; border-radius: 12px;
+  color: #fff; padding: 13px 16px;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer; margin-bottom: 10px;
+  transition: opacity .15s;
+}}
+.face-capture-btn:hover {{ opacity: .88; }}
+#setup-status {{
+  font-size: 12px; color: #888;
+  text-align: center; min-height: 18px;
+  padding: 2px 0;
+}}
 </style>
 </head>
 <body>
@@ -489,6 +531,7 @@ body {{
 
     <!-- Pipeline steps -->
     <div class="steps">
+      <span class="step" id="step-face">&#x1F512; Face ID</span>
       <span class="step" id="step-mic">&#x1F3A4; Voice</span>
       <span class="step" id="step-bedrock">&#x1F916; Bedrock</span>
       <span class="step" id="step-bunq">&#x1F3E6; bunq</span>
@@ -516,6 +559,20 @@ body {{
       <div class="finn-name">FINN</div>
       <div id="finn-text"></div>
     </div>
+  </div>
+</div>
+
+<!-- Face ID Setup Modal -->
+<div id="face-setup-modal">
+  <div class="modal-backdrop"></div>
+  <div class="face-sheet">
+    <div class="modal-tag">&#x1F512; FACE ID SETUP</div>
+    <div class="modal-title">Set Up Face ID</div>
+    <div class="modal-sub">Capture your face to secure bunq banking actions.</div>
+    <video id="setup-video" autoplay playsinline muted></video>
+    <canvas id="setup-canvas" style="display:none;"></canvas>
+    <button class="face-capture-btn" onclick="captureSetupFace()">&#x1F4F7;&nbsp; Capture Reference Photo</button>
+    <div id="setup-status"></div>
   </div>
 </div>
 
@@ -564,7 +621,7 @@ if (!SESSION_ID) {{
 console.log('Finn BACKEND endpoint:', BACKEND, 'session:', SESSION_ID);
 
 // ── Pipeline step indicator helpers ──────────────────────────────────────────
-const STEPS = ['step-mic','step-bedrock','step-bunq'];
+const STEPS = ['step-face','step-mic','step-bedrock','step-bunq'];
 function setStep(id, state) {{
   const el = document.getElementById(id);
   if (el) el.className = 'step ' + state;
@@ -634,7 +691,103 @@ function speak(text) {{
   window.speechSynthesis.speak(utt);
 }}
 window.speechSynthesis && window.speechSynthesis.getVoices();
-window.addEventListener('load', () => {{ setTimeout(() => openVoice(), 800); }});
+
+// ── Face authentication ────────────────────────────────────────────────────────
+let setupStream = null;
+
+async function openFaceSetup() {{
+  document.getElementById('face-setup-modal').classList.add('open');
+  document.getElementById('setup-status').textContent = 'Starting camera…';
+  try {{
+    setupStream = await navigator.mediaDevices.getUserMedia({{video: {{facingMode: 'user'}}}});
+    const video = document.getElementById('setup-video');
+    video.srcObject = setupStream;
+    await video.play();
+    document.getElementById('setup-status').textContent = '';
+  }} catch(e) {{
+    document.getElementById('setup-status').textContent = 'Camera access denied — allow camera in browser settings.';
+  }}
+}}
+
+async function captureSetupFace() {{
+  const video = document.getElementById('setup-video');
+  if (!video.videoWidth) {{
+    document.getElementById('setup-status').textContent = 'Camera not ready — please wait.';
+    return;
+  }}
+  const canvas = document.getElementById('setup-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  document.getElementById('setup-status').textContent = 'Saving reference photo…';
+  try {{
+    const res = await fetch(BACKEND + '/face/setup', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{image: b64}})
+    }});
+    const data = await res.json();
+    if (data.status === 'ok') {{
+      if (setupStream) setupStream.getTracks().forEach(t => t.stop());
+      setupStream = null;
+      document.getElementById('face-setup-modal').classList.remove('open');
+      document.getElementById('setup-status').textContent = '';
+      openVoice();
+    }} else {{
+      document.getElementById('setup-status').textContent = 'Setup failed: ' + (data.error || 'unknown error');
+    }}
+  }} catch(e) {{
+    document.getElementById('setup-status').textContent = 'Network error: ' + e.message;
+  }}
+}}
+
+async function captureAndVerifyFace() {{
+  let stream = null;
+  try {{
+    stream = await navigator.mediaDevices.getUserMedia({{video: {{facingMode: 'user', width: 640, height: 480}}}});
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    await new Promise(resolve => {{ video.onloadedmetadata = resolve; setTimeout(() => resolve(), 2000); }});
+    await video.play();
+    await new Promise(r => setTimeout(r, 400));
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const b64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    const vRes = await fetch(BACKEND + '/face/verify', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{image: b64}})
+    }});
+    const vData = await vRes.json();
+    return vData.match === true;
+  }} catch(e) {{
+    console.warn('Face verify error:', e);
+    return false;
+  }} finally {{
+    if (stream) stream.getTracks().forEach(t => t.stop());
+  }}
+}}
+
+async function checkFaceSetupAndInit() {{
+  try {{
+    const res = await fetch(BACKEND + '/face/status');
+    const data = await res.json();
+    if (!data.reference_set) {{
+      await openFaceSetup();
+    }} else {{
+      openVoice();
+    }}
+  }} catch(e) {{
+    openVoice();
+  }}
+}}
+
+window.addEventListener('load', () => {{ setTimeout(() => checkFaceSetupAndInit(), 1000); }});
 
 // ── Text query → /query endpoint ─────────────────────────────────────────────
 async function askFinnText() {{
@@ -760,6 +913,22 @@ async function sendTextToBackend(text) {{
   resetSteps();
   document.getElementById('finn-response').classList.remove('show');
   document.getElementById('spinner').classList.add('show');
+  setStep('step-face', 'active');
+  document.getElementById('mic-status').textContent = 'Verifying identity…';
+
+  let faceOk = false;
+  try {{ faceOk = await captureAndVerifyFace(); }} catch(e) {{ faceOk = false; }}
+
+  if (!faceOk) {{
+    document.getElementById('spinner').classList.remove('show');
+    setStep('step-face', 'error');
+    document.getElementById('finn-text').textContent = '⚠️ Face not recognised — look directly at the camera and try again.';
+    document.getElementById('finn-response').classList.add('show');
+    document.getElementById('mic-status').textContent = '';
+    return;
+  }}
+
+  setStep('step-face', 'done');
   setStep('step-bedrock', 'active');
   document.getElementById('mic-status').textContent = '';
 
@@ -769,14 +938,14 @@ async function sendTextToBackend(text) {{
     const res = await fetch(endpoint, {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ text, session_id: SESSION_ID }})
+      body: JSON.stringify({{ text, session_id: SESSION_ID, face_verified: true }})
     }});
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Backend error');
 
     setStep('step-bedrock', 'done');
     setStep('step-bunq', 'active');
-    document.getElementById('mic-status').textContent = 'Executing bunq action...';
+    document.getElementById('mic-status').textContent = 'Executing bunq action…';
     await new Promise(r => setTimeout(r, 400));
 
     showResponse(data.response);
